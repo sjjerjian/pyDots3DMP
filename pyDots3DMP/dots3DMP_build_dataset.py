@@ -9,6 +9,7 @@ from NeuralDataClasses import Population, ksUnit, Unit
 
 # %% build Population class
 
+
 def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
     """
     Parameters
@@ -80,13 +81,12 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
                           rec_date=rec_popn.rec_date, rec_set=rec_popn.rec_set)
             rec_popn.units.append(unit)
 
-
     # # read in cluster groups (from manual curation)
     # cgs = pd.read_csv(PurePath(filepath, 'cluster_group.tsv'), sep='\t')
-    
+
     # # read cluster info
     # clus_info = pd.read_csv(PurePath(filepath, 'cluster_info.tsv'), sep='\t')
-    
+
     # ss = np.squeeze(np.load(PurePath(filepath, 'spike_times.npy')))
     # sg = np.squeeze(np.load(PurePath(filepath, 'spike_clusters.npy')))
     # st = np.squeeze(np.load(PurePath(filepath, 'spike_templates.npy')))
@@ -109,6 +109,31 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
 
 # %%
 
+def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
+
+    cg = np.hstack(unitlabels)
+    conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
+
+    # always going to stack along the unit axis
+
+    # if times are uneven, then add extra NaNs, as determined by comparing tvecs
+    unq_time = np.unique(np.hstack(tvecs))
+    
+    # use concatenated tvecs and frs!
+    idx = [np.where(np.isin(t, unq_time)) for t in tvecs]
+
+    # if conditions are uneven, then insert extra NaNs, as determined by conds_dfs
+
+    # but if we are storing indivudal trials, need to also keep track ofconditions
+    # fr array will be units x trials x time (with trials up to the longest session)
+    # then we need a conditions array with units x trials x condvars, which should have the same mask
+
+
+    pseudo_pop = PseudoPop()
+    
+
+# %% convert cluster group int into cluster label
+
 
 def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
     """
@@ -122,8 +147,8 @@ def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    str
+        corresponding label in labels for clus_group
 
     """
 
@@ -133,12 +158,12 @@ def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
         return None
 
 
-# %%
+# %% MAIN
 
 
 if __name__ == '__main__':
 
-    # TODO - clean this up...
+    # TODO - clean this up...make it user selectable
     # subject = input("Enter subject:")
     subject = 'lucio'
     datapath = '/Volumes/homes/fetschlab/data/'
@@ -195,11 +220,12 @@ if __name__ == '__main__':
 
         for p, par in enumerate(pars):
 
-            if type(sess['data']) == dict and par_labels[p] in sess['data'].keys():
+            if type(sess['data']) == dict and \
+                    par_labels[p] in sess['data'].keys():
 
-                rec_popn, events = build_rec_popn(subject, rec_date, rec_sess_info,
-                                                  data=sess['data'][par_labels[p]],
-                                                  data_folder=rec_folder)
+                rec_popn, events = build_rec_popn(
+                    subject, rec_date, rec_sess_info,
+                    data=sess['data'][par_labels[p]], data_folder=rec_folder)
 
                 rec_df.loc[index, par] = rec_popn
 
