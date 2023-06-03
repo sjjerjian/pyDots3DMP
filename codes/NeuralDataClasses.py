@@ -17,7 +17,7 @@ import seaborn as sns
 from datetime import date
 
 from dataclasses import dataclass, field
-import dots3DMP_FRutils as FRutils
+import modules.dots3DMP_FRutils as FRutils
 
 # %% generic unit class
 
@@ -241,7 +241,7 @@ class PseudoPop:
 # %%
 
 
-def rel_event_times(events, align=['stimOn'], others=['stimOff']):
+def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
 

@@ -13,7 +13,7 @@ from scipy.stats import pearsonr, zscore
 from scipy.special import comb
 from itertools import combinations
 
-from dots3DMP_FRutils import condition_index
+from modules.dots3DMP_FRutils import condition_index
 
 # %%  helper functions
 

@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path, PurePath
 import scipy.io as sio
 import pickle as pkl
-from NeuralDataClasses import Population, ksUnit, Unit
+from modules.NeuralDataClasses import Population, ksUnit
 
 # %% build Population class
 
@@ -56,11 +56,10 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
     if isinstance(data['units']['cluster_id'], int):
 
         spk_times = np.array(data['units']['spiketimes'])
-        clus_group = data['units']['cluster_type']
         unit = ksUnit(spiketimes=spk_times, amps=np.empty(spk_times.shape),
                       clus_id=data['units']['cluster_id'],
-                      clus_group=clus_group,
-                      clus_label=get_cluster_label(clus_group),
+                      clus_group=data['units']['cluster_type'],
+                      clus_label=data['units']['cluster_label'],
                       channel=data['units']['ch'],
                       depth=data['units']['depth'],
                       rec_date=rec_popn.rec_date, rec_set=rec_popn.rec_set)
@@ -70,12 +69,11 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
         nUnits = data['units']['cluster_id'].size
         for u in range(nUnits):
             spk_times = np.array(data['units']['spiketimes'][u])
-            clus_group = data['units']['cluster_type'][u]
             unit = ksUnit(spiketimes=spk_times,
                           amps=np.empty(spk_times.shape),
                           clus_id=data['units']['cluster_id'][u],
-                          clus_group=clus_group,
-                          clus_label=get_cluster_label(clus_group),
+                          clus_group=data['units']['cluster_type'][u],
+                          clus_label=data['units']['cluster_label'][u],
                           channel=data['units']['ch'][u],
                           depth=data['units']['depth'][u],
                           rec_date=rec_popn.rec_date, rec_set=rec_popn.rec_set)
@@ -109,27 +107,28 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
 
 # %%
 
-def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
 
-    cg = np.hstack(unitlabels)
-    conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
+# def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
 
-    # always going to stack along the unit axis
+#     cg = np.hstack(unitlabels)
+#     conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
-    # if times are uneven, then add extra NaNs, as determined by comparing tvecs
-    unq_time = np.unique(np.hstack(tvecs))
+#     # always going to stack along the unit axis
+
+#     # if times are uneven, then add extra NaNs, as determined by comparing tvecs
+#     unq_time = np.unique(np.hstack(tvecs))
     
-    # use concatenated tvecs and frs!
-    idx = [np.where(np.isin(t, unq_time)) for t in tvecs]
+#     # use concatenated tvecs and frs!
+#     idx = [np.where(np.isin(t, unq_time)) for t in tvecs]
 
-    # if conditions are uneven, then insert extra NaNs, as determined by conds_dfs
+#     # if conditions are uneven, then insert extra NaNs, as determined by conds_dfs
 
-    # but if we are storing indivudal trials, need to also keep track ofconditions
-    # fr array will be units x trials x time (with trials up to the longest session)
-    # then we need a conditions array with units x trials x condvars, which should have the same mask
+#     # but if we are storing indivudal trials, need to also keep track of conditions
+#     # fr array will be units x trials x time (with trials up to the longest session)
+#     # then we need a conditions array with units x trials x condvars, which should have the same mask
 
 
-    pseudo_pop = PseudoPop()
+#     pseudo_pop = PseudoPop()
     
 
 # %% convert cluster group int into cluster label

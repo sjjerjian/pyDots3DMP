@@ -8,19 +8,18 @@ Created on Wed Apr 12 08:49:37 2023
 
 # %% imports and data load
 
-import numpy as np
-import pandas as pd
+import pickle as pkl
 from itertools import repeat
 from pathlib import PurePath
-import pickle as pkl
-
-# custom imports
-from NeuralDataClasses import Population, ksUnit, Unit, PseudoPop
-from dots3DMP_behavior import dots3DMP_create_trial_list
-import dots3DMP_FRutils as FRutils
-import tuning_utils as tuning
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from modules.NeuralDataClasses import Unit, ksUnit, Population, PseudoPop
+import modules.dots3DMP_FRutils as FRutils
+import modules.tuning_utils as tuning
+from modules.dots3DMP_behavior import dots3DMP_create_trial_list
 
 data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data'
 filename = PurePath(data_folder, 'lucio_neuro_datasets',
