@@ -108,27 +108,38 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
 # %%
 
 
-# def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
+def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
 
-#     cg = np.hstack(unitlabels)
-#     conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
+    cg = np.hstack(unitlabels)
+    # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
-#     # always going to stack along the unit axis
+    # stack firing rates, along unit axis, with insertion on time axis according to t_idx
+    num_units = np.array([x[0].shape[0] for x in fr_list])
+    max_trs = max(list(map(len, list(conds_dfs))))
 
-#     # if times are uneven, then add extra NaNs, as determined by comparing tvecs
-#     unq_time = np.unique(np.hstack(tvecs))
-    
-#     # use concatenated tvecs and frs!
-#     idx = [np.where(np.isin(t, unq_time)) for t in tvecs]
+    stacked_frs = []
 
-#     # if conditions are uneven, then insert extra NaNs, as determined by conds_dfs
+    # if times are uneven, then add extra NaNs, as determined by comparing tvecs
+    t_unq, t_idx = [], []
+    for j in range(len(tvecs[0])):
+        concat_tvecs = [tvecs[i][j] for i in range(len(tvecs))]
+        t_unq.append(np.unique(np.concatenate(concat_tvecs)))
+        t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
 
-#     # but if we are storing indivudal trials, need to also keep track of conditions
-#     # fr array will be units x trials x time (with trials up to the longest session)
-#     # then we need a conditions array with units x trials x condvars, which should have the same mask
+        stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
 
 
-#     pseudo_pop = PseudoPop()
+        # if we are stacking units with condition averages, then we need to create a c_idx as well to correctly insert matched conditions
+        # and for either case (average or individual trials, we need to keep the conditions)
+
+        u_pos = 0
+        for sess in range(len(fr_list)):
+            print(u_pos)
+
+            stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
+            u_pos = u_pos + num_units[sess]
+
+
     
 
 # %% convert cluster group int into cluster label
