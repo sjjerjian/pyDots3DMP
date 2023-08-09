@@ -7,17 +7,15 @@ Created on Thu Apr 13 08:37:40 2023
 """
 
 import numpy as np
+import pandas as pd
 import xarray as xr
-
-import pdb
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import seaborn as sns
 from datetime import date
 
 from dataclasses import dataclass, field
-import modules.dots3DMP_FRutils as FRutils
+import codes.dots3DMP_FRutils as FRutils
 
 # %% generic unit class
 
@@ -87,16 +85,17 @@ class ksUnit(Unit):
     depth: int = field(default=0, metadata={'unit': 'mm'})
     rec_set: int = 1
 
-    # something about this doesn't work, doesn't recognize as attribute
+    # TODO something doesn't work here - unique_id isn't being recognized as an attribute
     # def __post_init__(self):
     #     self.unique_id = \
     #         int(f"{self.rec_date}{self.rec_set:02d}{self.clus_id:03d}")
 
     # TODO add contam pct
-    # TODO allow this to plot multiple alignments?
 
-    def raster_plot(spiketimes, align, condlist, col, hue, **kwargs):
-        fig, ax = plot_raster(spiketimes, align, condlist, col, hue, **kwargs)
+
+    # TODO wrap this to allow plotting multiple alignments
+    def raster_plot(self, align, condlist, col, hue, **kwargs):
+        fig, ax = plot_raster(self.spiketimes, align, condlist, col, hue, **kwargs)
         return fig, ax
 
 
@@ -105,12 +104,6 @@ class ksUnit(Unit):
 
 @dataclass
 class Population:
-    """
-    data from one recording set
-        - metadata
-        - list of unit instances, one per recorded unit
-        - dictionary/pandas df of task events and times
-    """
 
     rec_date: date = date.today().strftime("%Y%m%d")
     create_date: date = date.today().strftime("%Y%m%d")
@@ -131,6 +124,7 @@ class Population:
 
     units: list[Unit] = field(default_factory=list, repr=False)
     events: dict = field(default_factory=dict, repr=False)
+    rel_event_times: dict = field(default_factory=dict, repr=False, init=False)
 
     def __len__(self):
         return len(self.units)
@@ -141,104 +135,48 @@ class Population:
         return False
 
     def popn_rel_event_times(self, align=['stimOn'], others=['stimOff']):
-        return rel_event_times(self.events, align, others)
+        self.rel_event_times = rel_event_times(self.events, align, others)
+        return self.rel_event_times
 
-    def calc_firing_rates(self, align_ev='stimOn', trange=np.array([[-2, 3]]),
-                          binsize=0.05, sm_params={},
-                          condlabels=['modality', 'coherence', 'heading'],
-                          return_Dataset=False):
-
-        good_trs = self.events['goodtrial'].to_numpy(dtype='bool')
-        condlist = self.events[condlabels].loc[good_trs, :]
-
-        rates = []
-        tvecs = []
-        align_lst = []
-
-        for al, t_r in zip(align_ev, trange):
-
-            if self.events.loc[good_trs, al].isna().all(axis=0).any():
-                raise ValueError(al)
-
-            align = self.events.loc[good_trs, al].to_numpy(dtype='float64')
-
-            # get spike counts and relevant t_vec for each unit
-            # trial_psth in list comp is going to generate a list of tuples
-            # the zip(*iter) syntax allows us to unpack the tuples into the
-            # separate variables
-            spike_counts, t_vec, _ = \
-                zip(*[(FRutils.trial_psth(unit.spiketimes, align, t_r,
-                                          binsize, sm_params))
-                      for unit in self.units])
-
-            rates.append(np.asarray(spike_counts))
-            tvecs.append(np.asarray(t_vec[0]))
-
-            # considered dict align_lst with key as alignment event, but al[0]
-            # might not be unique!
-
-            align_lst.append([al]*len(t_vec[0]))
-
-        align_arr = np.concatenate(align_lst)
-
-        unitlabels = np.array([u.clus_group for u in self.units])
-        # unit_ids  = np.array([u.clus_id for u in popn.units])
-
-        if return_Dataset:
-            arr = xr.DataArray(np.concatenate(rates, axis=2),
-                               coords=[unitlabels,
-                                       condlist.index,
-                                       np.concatenate(tvecs)],
-                               dims=['unit', 'trial', 'time'])
-
-            cond_coords = {condlabels[c]: ('trial', condlist.iloc[:, c])
-                           for c in range(len(condlist.columns))}
-
-            ds = xr.Dataset({'firing_rate': arr},
-                            coords={'align_event': ('time', align_arr),
-                                    **cond_coords})
-
-            ds.attrs['rec_date'] = self.rec_date
-            ds.attrs['area'] = self.area
-
-            return ds
-
-        else:
-            # return separate vars
-            return rates, unitlabels, condlist, tvecs, align_lst
-
-
-# %% PseudoPop class
+    def get_firing_rates(self, *args, **kwargs):
+        return calc_firing_rates(self.units, self.events, *args, **kwargs)
 
 
 @dataclass
 class PseudoPop:
     """processed firing rates and events data from one or more recordings"""
 
-    # numpy array units x 'trials' x time
-    # note that trials can be replaced by conditions here,
-    # or trials x conditions combination
-    # (although if we have individual trials across non-simul recorded,
-    # the trial label is meaningless)
+    # numpy array units x 'trials'/conditions x time
+
+    # if using trial-averaged data, then 2nd dim should be conditions
+    # if using individual trials,
+    # and we want to keep additional array labelling trial/unique conditions
 
     # timestamps
 
+    subject: None
+    unit_session: np.ndarray = field(repr=False)
+    area: np.ndarray = field(repr=False)
     clus_group: np.ndarray = field(repr=False)
 
     create_date: date = date.today().strftime("%Y%m%d")
-    subject: str = ''
-    area: str = ''
-
-    hist_sm_params: dict = field(default_factory=dict, repr=False)
-    hist_binsize: float = 0
 
     conds: dict = field(default_factory=dict, repr=False)
 
-    align_event:  list[str] = field(default_factory=list)
+    # align_event:  list[str] = field(default_factory=list)
     firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False)
 
-# %%
+    def get_unique_areas(self):
+        return np.unique(self.area)
+
+
+
+
+@dataclass
+class Population_xr:
+    # TODO implement with xarray
+    ...
 
 
 def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
@@ -258,15 +196,78 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
     return reltimes
 
 
-def plot_raster(spiketimes, align, condlist, col, hue,
-                titles=None, suptitle='',
-                align_label='', other_evs=[], other_ev_labels=[],
-                trange=np.array([-2, 3]),
-                cmap=None, hue_norm=(-12, 12),
-                binsize=0.05, sm_params={}):
+def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
+                      binsize=0.05, sm_params={},
+                      condlabels=('modality', 'coherence', 'heading'),
+                      return_dataset=False):
 
-    # condlist should be pandas df with conditions
-    # align_ev should be np array of same length as condlist
+    good_trs = events['goodtrial'].to_numpy(dtype='bool')
+    condlist = events[condlabels].loc[good_trs, :]
+
+    rates = []
+    tvecs = []
+    align_lst = []
+
+    for al, t_r in zip(align_ev, trange):
+
+        if events.loc[good_trs, al].isna().all(axis=0).any():
+            raise ValueError(al)
+
+        align = events.loc[good_trs, al].to_numpy(dtype='float64')
+
+        # get spike counts and relevant t_vec for each unit
+        # trial_psth in list comp is going to generate a list of tuples
+        # the zip(*iterable) syntax allows us to unpack the tuples into separate variables
+        spike_counts, t_vec, _ = \
+            zip(*[(FRutils.trial_psth(unit.spiketimes, align, t_r,
+                                      binsize, sm_params))
+                  for unit in units])
+
+        rates.append(np.asarray(spike_counts))
+        tvecs.append(np.asarray(t_vec[0]))
+
+        # this list may be useful if constructing a large pandas dataframe and then using align_event as a hue
+        if isinstance(al, str):
+            al = [al]
+        align_lst.append([al[0]]*len(t_vec[0]))
+
+    align_arr = np.concatenate(align_lst)
+
+    unitlabels = np.array([u.clus_group for u in units])
+    # unit_ids  = np.array([u.clus_id for u in popn.units])
+
+    # return an xarray Dataset
+    if return_dataset:
+        arr = xr.DataArray(np.concatenate(rates, axis=2),
+                           coords=[unitlabels,
+                                   condlist.index,
+                                   np.concatenate(tvecs)],
+                           dims=['unit', 'trial', 'time'])
+
+        cond_coords: dict = {condlabels[c]: ('trial', condlist.iloc[:, c])
+                       for c in range(len(condlist.columns))}
+
+        ds = xr.Dataset({'firing_rate': arr},
+                        coords={'align_event': ('time', align_arr),
+                                **cond_coords})
+        return ds
+
+    else:
+        # return separate vars
+        return rates, unitlabels, condlist, tvecs, align_lst
+
+
+# def plot_psth(firing_rates, )
+    # firing rates should be
+
+def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFrame, col: str, hue: str,
+                titles=None, suptitle: str = '', align_label='',
+                other_evs=None, other_ev_labels=None,  # TODO, not yet implemented
+                trange: np.ndarray = np.array([-2, 3]),
+                cmap=None, hue_norm=(-12, 12), binsize: int = 0.05, sm_params=None):
+
+    if sm_params is None:
+        sm_params = dict()
 
     df = condlist[col].copy()
     df[hue] = condlist.loc[:, hue]
@@ -320,7 +321,7 @@ def plot_raster(spiketimes, align, condlist, col, hue,
         # https://stackoverflow.com/questions/31910407/
         order = np.argsort(np.argsort(ic)).tolist()
 
-        # TODO further sort within cond by user input e.g. RT
+        # TODO further sort within cond by user-specified input e.g. RT
 
         # get color for each trial, based on heading, convert to list
         colors = cmap(hue_norm(cond_df[hue]).data.astype('float'))
