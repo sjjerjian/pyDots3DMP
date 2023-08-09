@@ -8,10 +8,18 @@ from dataclasses import dataclass, field
 
 @dataclass
 class AccumulatorModelMOI:
+    """
+    Dataclass for accumulator model calculated via method of images
+    Initialized with certain parameters, then can calculate pdf, logoddsmap, cdf etc, using class methods
 
+    # TODO might be useful to add some plotting methods
+    # TODO clean up documentation
+
+    """
     tvec: np.ndarray = field(repr=False)
     grid_vec: np.ndarray
-    drift_rates: np.ndarray
+    drift_rates: list
+    sensitivity: float = field(default=1)
     urgency: np.ndarray = field(default=0)
     bound: np.ndarray = field(default=1)
     num_images: int = 7
@@ -29,8 +37,13 @@ class AccumulatorModelMOI:
     log_odds: np.ndarray = field(init=False)
 
     def __post_init__(self):
+        # if single drift values provided, add corresponding negated value for anti-correlated accumulator
+        # also update drift rates based on sensitivity and urgency, if provided
         for d, drift in enumerate(self.drift_rates):
-            self.drift_rates[d] = urgency_scaling(drift, self.tvec, self.urgency)
+            if isinstance(drift, (int, float)) or len(drift) == 1:
+                drift = drift * np.array([1, -1])
+
+            self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
 
     def pdf(self, return_marginals=True, return_mesh=True):
 
@@ -92,17 +105,6 @@ class AccumulatorModelMOI:
         return self
 
 
-
-    # attrs from methods
-    # prob correct
-    # rt distribution
-    # full 3d pdf
-    # losing race pdfs for correct and incorrect
-    # log odds map
-
-    # plotting methods
-
-
 def sj_rot(j, s0, k):
     """
 
@@ -137,6 +139,7 @@ def weightj(j, mu, sigma, sj, s0):
     """
 
     return (-1) ** j * np.exp(mu @ np.linalg.inv(sigma) @ (sj - s0).T)
+
 
 def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarray, bound=np.array([1, 1]), num_images: int=7):
     """
@@ -180,24 +183,7 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarr
     return pdf_result
 
 
-def moi_pdf_decorator(func):
-    def wrapper(*args, **kwargs):
-        pdf_result = func(*args, **kwargs)
-
-
-        p_up_lose_pdf = np.squeeze(np.sum(pdf_result, axis=2))  # sum over y
-        p_lo_lose_pdf = np.squeeze(np.sum(pdf_result, axis=1))  # sum over x
-
-        p_up_pdf = np.sum(pdf_result[:, -1, :], axis=1)
-        p_lo_pdf = np.sum(pdf_result[:, :, -1], axis=1)
-
-        p_up_cdf = np.cumsum(p_up_pdf)
-        p_lo_cdf = np.cumsum(p_lo_pdf)
-
-    return wrapper
-
-
-def moi_cdf(tvec, mu, bound=np.array([1, 1]), num_images: int=7):
+def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), num_images: int = 7):
     """
     For a given 2-D particle accumulator with drift mu over time tvec, calculate
         a) the probability of a correct choice
@@ -210,7 +196,7 @@ def moi_cdf(tvec, mu, bound=np.array([1, 1]), num_images: int=7):
     :param num_images: number of images for method of images, default 7
     :return: probability of correct choice (p_up), and decision time distribution (rt_dist)
 
-    TODO see how mcuh changing the difference between bound and bound_marginal affects anything
+    TODO see how much changing the difference between bound and bound_marginal affects anything
 
     """
     k = int(np.ceil(num_images / 2))
