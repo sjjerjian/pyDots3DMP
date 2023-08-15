@@ -6,37 +6,38 @@ import numba as nb
 import time
 from dataclasses import dataclass, field
 
-@dataclass
+
+@dataclass(repr=False)
 class AccumulatorModelMOI:
     """
     Dataclass for accumulator model calculated via method of images
     Initialized with certain parameters, then can calculate pdf, logoddsmap, cdf etc, using class methods
 
-    # TODO might be useful to add some plotting methods
     # TODO clean up documentation
 
     """
-    tvec: np.ndarray = field(repr=False)
-    grid_vec: np.ndarray
-    drift_rates: list
+
+    tvec: np.ndarray = field(default=np.arange(0, 2, 0.005))
+    grid_spacing: float = field(default=0.025)
+    drift_rates: list = field(default_factory=lambda: [0, 1, 2])
+    drift_labels: list = field(default_factory=list)
     sensitivity: float = field(default=1)
     urgency: np.ndarray = field(default=0)
-    bound: np.ndarray = field(default=1)
+    bound: np.ndarray = np.array([1, 1])  # TODO allow to be int, then duplicate
     num_images: int = 7
 
-    grid_xmesh: np.ndarray = field(init=False)
-    grid_ymesh: np.ndarray = field(init=False)
+    # TODO clean this up a bit, if we can
+    grid_vec: np.ndarray = np.array([])
+    grid_xmesh: np.ndarray = np.array([])
+    grid_ymesh: np.ndarray = np.array([])
+    p_corr: np.ndarray = np.array([])
+    rt_dist: np.ndarray = np.array([])
+    pdf3D: np.ndarray = np.array([])
+    up_lose_pdf: np.ndarray = np.array([])
+    lo_lose_pdf: np.ndarray = np.array([])
+    log_odds: np.ndarray = np.array([])
 
-    p_corr: np.ndarray = field(init=False)
-    rt_dist: np.ndarray = field(init=False)
-
-    pdf3D: np.ndarray = field(init=False)
-    up_lose_pdf: np.ndarray = field(init=False)
-    lo_lose_pdf: np.ndarray = field(init=False)
-
-    log_odds: np.ndarray = field(init=False)
-
-    def __post_init__(self):
+    def scale_drift(self):
         # if single drift values provided, add corresponding negated value for anti-correlated accumulator
         # also update drift rates based on sensitivity and urgency, if provided
         for d, drift in enumerate(self.drift_rates):
@@ -44,6 +45,17 @@ class AccumulatorModelMOI:
                 drift = drift * np.array([1, -1])
 
             self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
+
+    def set_drifts(self, drifts):
+        self.drift_rates = drifts
+        self.scale_drift()
+
+    def __post_init__(self):
+        self.grid_vec = np.arange(-np.max(self.bound)*3, 0, self.grid_spacing)
+
+        if len(self.drift_labels) == 0:
+            self.drift_labels = np.arange(len(self.drift_rates))
+        self.scale_drift()
 
     def pdf(self, return_marginals=True, return_mesh=True):
 
@@ -63,12 +75,14 @@ class AccumulatorModelMOI:
             if return_marginals is False:
                 pdfs.append(pdf_3d)
             else:
-                marg_up.append(np.sum(pdf_3d, axis=2))  # sum over y
-                marg_lo.append(np.sum(pdf_3d, axis=1))  # sum over x
 
-                # TODO validate this, and return them if we want...
-                up_pdf = np.sum(pdf_3d[:, -1, :], axis=1)
-                lo_pdf = np.sum(pdf_3d[:, :, -1], axis=1)
+                # distribution of losing accumulator, GIVEN that winner has hit bound
+                marg_up.append(pdf_3d[:, :, -1])  # right bound
+                marg_lo.append(pdf_3d[:, -1, :])  # top bound
+
+                # I think this is right, pdf of losing accumulator summed across all values of dv
+                up_pdf = np.sum(pdf_3d[:, :, -1], axis=1)
+                lo_pdf = np.sum(pdf_3d[:, -1, :], axis=1)
 
                 up_cdf = np.cumsum(up_pdf)
                 lo_cdf = np.cumsum(lo_pdf)
@@ -83,11 +97,12 @@ class AccumulatorModelMOI:
 
     def log_posterior_odds(self):
         self.log_odds = log_odds(self.up_lose_pdf, self.lo_lose_pdf)
+        return self
 
     def cdf(self):
         p_corr, rt_dist = [], []
         for drift in self.drift_rates:
-            p_up, rt = moi_cdf(self.tvec, drift, self.bound, self.num_images)
+            p_up, rt = moi_cdf(tvec=self.tvec, mu=drift, bound=self.bound, num_images=self.num_images)
             p_corr.append(p_up)
             rt_dist.append(rt)
 
@@ -96,13 +111,54 @@ class AccumulatorModelMOI:
 
         return self
 
-    def fit(self, return_pdf=False):
+    def dist(self, return_pdf=False):
         self.cdf()
 
         if return_pdf:
             self.pdf(return_marginals=True).log_posterior_odds()
 
         return self
+
+    def plot(self, d_ind=4, include_pdfs=True):
+
+        has_cdf = hasattr(self, 'p_corr')
+        has_pdf = hasattr(self, 'up_lose_pdf') and include_pdfs
+        has_log = hasattr(self, 'log_odds') and include_pdfs
+
+        if has_cdf:
+            fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
+            axc[0].plot(self.drift_labels, self.p_corr)
+            axc[0].set_xlabel('drift')
+            axc[0].set_xticks(self.drift_labels)
+            axc[0].set_ylabel('prob. correct choice')
+
+            axc[1].plot(self.tvec, self.rt_dist.T)
+            axc[1].legend(self.drift_labels)
+            axc[1].set_xlabel('Time (s)')
+            axc[1].set_title('RT distribution (no NDT)')
+            fig_cdf.tight_layout()
+
+        if has_pdf:
+            fig_pdf, axp = plt.subplots(2+has_log, 1, figsize=(5, 6))
+            contour = axp[0].contourf(self.tvec, self.grid_vec,
+                                      log_pmap(np.squeeze(self.up_lose_pdf[d_ind, :, :])).T,
+                                      levels=100)
+            axp[1].contourf(self.tvec, self.grid_vec,
+                            log_pmap(np.squeeze(self.lo_lose_pdf[d_ind, :, :])).T,
+                            levels=100)
+            axp[0].set_title(f"Losing accumulator | Correct, drift rate {self.drift_labels[d_ind]}")
+            axp[1].set_title(f"Losing accumulator | Error, drift rate {self.drift_labels[d_ind]}")
+            cbar = fig_cdf.colorbar(contour, ax=axp[0])
+            cbar = fig_cdf.colorbar(contour, ax=axp[1])
+
+            if has_log:
+                vmin, vmax = 0, 3
+                contour = axp[2].contourf(self.tvec, self.grid_vec,
+                                          self.log_odds.T, vmin=vmin, vmax=vmax,
+                                          levels=100)
+                axp[2].set_title("Log Odds of Correct Choice given Losing Accumulator")
+                cbar = fig_pdf.colorbar(contour, ax=axp[2])
+            fig_pdf.tight_layout()
 
 
 def sj_rot(j, s0, k):
@@ -183,7 +239,7 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarr
     return pdf_result
 
 
-def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), num_images: int = 7):
+def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
     """
     For a given 2-D particle accumulator with drift mu over time tvec, calculate
         a) the probability of a correct choice
@@ -207,7 +263,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), num_images: int = 7):
     flux1, flux2 = np.empty(len(tvec)), np.empty(len(tvec))
 
     s0 = -bound
-    b0, bm = -0.025, 0
+    b0, bm = -margin_width, 0
     bound0 = np.array([b0, b0])
     bound1 = np.array([b0, bm])  # top boundary of third quadrant
     bound2 = np.array([bm, b0])  # right boundary
@@ -293,12 +349,14 @@ def log_odds(pdf1, pdf2):
     :return log_odds_correct: heatmap, log posterior odds of correct choice
     """
 
+    # replaces zeros with tiny value to avoid logarithm issues
     pdf1[pdf1 == 0] = np.finfo(np.float64).tiny
     pdf2[pdf2 == 0] = np.finfo(np.float64).tiny
 
     odds = np.sum(pdf1, axis=0) / np.sum(pdf2, axis=0)
     odds[odds < 1] = 1
     return np.log(odds)
+
 
 def log_pmap(pdf, q=30):
     """
