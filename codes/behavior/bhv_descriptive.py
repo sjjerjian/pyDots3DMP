@@ -20,7 +20,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from scipy.optimize import curve_fit
 
-from bhv_preprocessing import *
+from codes.behavior.bhv_preprocessing import *
 
 
 def behavior_means(df, conftask=2, by_conds=None):
@@ -220,36 +220,10 @@ def RTquantiles(df: pd.DataFrame, by_conds, q_conds=None, nq: int=5, depvar: str
     return RTq
 
 
+def basic_behavior_analysis(subject, date_range):
 
-if __name__ == "__main__":
-
-    subject = "lucio"
-    folder = "/Users/stevenjerjian/Desktop/FetschLab/PLDAPS_data/dataStructs/"
-    filename = "lucio_20220512-20230605.csv"
-    bhv_df = pd.read_csv(PurePath(folder, filename))
-
-    bins = [[0, 0.5, 1],
-            [-14, -8, -4, -2, -1, 1, 2, 4, 8, 14],
-            [-5, -2, 2, 5]]
-    labels = [[0.2, 0.7],
-             [-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12],
-             [-3, 0, 3]]
-
-    drop_cols = ["TargMissed", "confRT", "insertTrial", "filename", "subj", "trialNum",
-                 "amountRewardLowConfOffered", "amountRewardHighConfOffered", "reward"]
-
-    bhv_df_clean = (bhv_df
-                    .pipe(drop_brfix)
-                    .pipe(drop_one_targs)
-                    .pipe(zero_one_choice)
-                    .pipe(drop_columns, columns=drop_cols)
-                    .pipe(drop_outlierRTs, grp_cols=['modality'], rt_range=(0.25, 2))
-                    .pipe(bin_conditions, columns=['coherence','heading','delta'], bin_ranges=bins, bin_labels=labels)
-                    )
-    bhv_df_clean['heading'] = bhv_df_clean['heading'].astype('float')
-    bhv_df_clean['delta'] = bhv_df_clean['delta'].astype('float')
-    bhv_df_clean['modality'] = bhv_df_clean['modality'].astype('category')
-
+    # should just pass in the actual file name?
+    bhv_df_clean = data_cleanup(subject=subject, date_range=date_range)
 
     # create a single column for PDW, with oneTarg trials coded as 2
     bhv_df_clean["PDW_1targ"] = bhv_df_clean['PDW']
@@ -274,14 +248,16 @@ if __name__ == "__main__":
 
     # regression analyses
 
-
-    #1.
+    # 1.
     formula = 'choice ~ heading + C(modality) + heading*C(modality)'
-    fit_acc = smf.logit(formula, data=bhv_df).fit()
+    fit_acc = smf.logit(formula, data=bhv_df_clean).fit()
     print(fit_acc.summary())
 
-    bhv_df['abs_heading'] = np.abs(bhv_df['heading'])
+    bhv_df_clean['abs_heading'] = np.abs(bhv_df_clean['heading'])
     formula = 'correct ~ abs_heading*C(PDW_1targ)'
-    fit_p = smf.logit(formula, data=bhv_df).fit()
+    fit_p = smf.logit(formula, data=bhv_df_clean).fit()
     print(fit_p.summary())
-    
+
+
+if __name__ == "__main__":
+    run_basic_behavior_analysis("lucio", (20220512, 20230605))
