@@ -70,29 +70,46 @@ def zero_one_choice(df):
         df['choice'] -= 1
     return df
 
-# %%
 
-if __name__ == "__main__":
+def data_cleanup(subject: str, date_range, drop_cols=None, to_file=False):
 
-    subject = "lucio"
+    # TODO add kwargs for drop and binning parameters below, currently hardcoded...
+
     folder = "/Users/stevenjerjian/Desktop/FetschLab/PLDAPS_data/dataStructs/"
-    filename = "lucio_20220512-20230605.csv"
+    filename = f"{subject}_{date_range[0]}-{date_range[-1]}.csv"
+    clean_filename = f"{subject}_{date_range[0]}-{date_range[-1]}_clean.csv"
+
     bhv_df = pd.read_csv(PurePath(folder, filename))
 
-    hdg_bins = [-12, -8, -4, -2, -1, 1, 2, 4, 8, 12]
-    hdg_labels = [-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12]
+    bins = [[0, 0.5, 1],
+            [-14, -8, -4, -2, -1, 1, 2, 4, 8, 14],
+            [-5, -2, 2, 5]]
+    labels = [[0.2, 0.7],
+             [-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12],
+             [-3, 0, 3]]
 
-    coh_bins = [0, 0.5, 1]
-    coh_labels = [0.2, 0.7]
+    if drop_cols is None:
+        drop_cols = ["TargMissed", "confRT", "insertTrial", "filename", "subj", "trialNum",
+                        "amountRewardLowConfOffered", "amountRewardHighConfOffered", "reward"]
 
     bhv_df_clean = (bhv_df
                     .pipe(drop_brfix)
                     .pipe(drop_one_targs)
                     .pipe(zero_one_choice)
-                    .pipe(drop_columns, columns=["TargMissed","confRT","insertTrial"])
+                    .pipe(drop_columns, columns=drop_cols)
                     .pipe(drop_outlierRTs, grp_cols=['modality'], rt_range=(0.25, 2))
-                    .pipe(bin_conditions, column=['coherence','heading','delta'], bin_ranges=bins, bin_labels=labels)
+                    .pipe(bin_conditions, columns=['coherence','heading','delta'], bin_ranges=bins, bin_labels=labels)
                     )
 
-    bhv_df_clean['heading'] = bhv_df_clean['heading'].astype('numeric')
+    bhv_df_clean['heading'] = bhv_df_clean['heading'].astype('float')
+    bhv_df_clean['delta'] = bhv_df_clean['delta'].astype('float')
     bhv_df_clean['modality'] = bhv_df_clean['modality'].astype('category')
+
+    if to_file:
+        bhv_df_clean.to_csv(PurePath(folder, clean_filename))
+    else:
+        return bhv_df_clean
+
+
+if __name__ == "__main__":
+    data = data_cleanup("lucio", (20220512, 20230605))
