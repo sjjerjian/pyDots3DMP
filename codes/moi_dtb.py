@@ -371,49 +371,8 @@ def log_pmap(pdf, q=30):
 
 def main():
 
-    xmesh, ymesh = np.mgrid[-7:0:0.05, -7:0:0.05]
-    xy_mesh = np.dstack((xmesh, ymesh))
-
-    tvec = np.arange(0, 2, 0.005)
-    cohs = [0, 0.032, 0.064, 0.128, 0.256, 0.512]
-
-    sensitivity = 15
-    num_images = 7
-    bound = np.array([1, 1], dtype=float)
-
-    p_up_coh, RTdist, pdf_cohs, p_up_lose_pdf, p_lo_lose_pdf = [], [], [], [], []
-    for coh in cohs:
-        mu = np.array([sensitivity*coh, sensitivity*-coh], dtype=float)
-        mu = urgency_scaling(mu, tvec, urg_max=0)  # no urgency signal
-
-        start = time.time()
-
-        p_up, r = moi_cdf(tvec, mu, bound, num_images)
-        pdf_m = moi_pdf(xmesh, ymesh, tvec, mu, bound, num_images)
-
-        end = time.time()
-        print(f"Elapsed time = {end-start:.4f}")
-
-        pdf_cohs.append(pdf_m)
-        p_up_coh.append(p_up)
-        RTdist.append(r)
-
-        # pdfs are time by x*y !
-        p_up_lose_pdf.append(np.squeeze(np.sum(pdf_m, axis=2))) # sum over y
-        p_lo_lose_pdf.append(np.squeeze(np.sum(pdf_m, axis=1))) # sum over x
-
-    p_up_coh = np.array(p_up_coh)
-    RTdist = np.stack(RTdist, axis=0)
-
-    p_up_lose_pdf = np.stack(p_up_lose_pdf, axis=0)
-    p_lo_lose_pdf = np.stack(p_lo_lose_pdf, axis=0)
-
-    fig, ax = plt.subplots(3, 1)
-    ax[0].plot(cohs, p_up_coh)
-    ax[2].plot(tvec, RTdist.T)
-
-    log_odds_correct = log_odds(p_up_lose_pdf, p_lo_lose_pdf)
-
+    accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
+    accum.dist(return_pdf=True).log_posterior_odds().plot()
 
 if __name__ == '__main__':
     main()
