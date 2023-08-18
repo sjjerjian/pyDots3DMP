@@ -275,6 +275,10 @@ def condition_averages(f_rates, condlist, cond_groups=None):
 
     return cond_fr, cond_sem, cond_groups
 
+def concat_split_wrapper(fr_list, tvecs, func):
+    rates, len_ints = concat_aligned_rates(fr_list, tvecs)
+    #apply func
+    fr_split = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], rates, len_ints))
 
     # if type == 'avg':
     #     sns.lineplot(data=df,
@@ -289,73 +293,3 @@ def condition_averages(f_rates, condlist, cond_groups=None):
     #                     facet_kws=dict(sharex=False),
     #                     kind='line', aspect=.75)
 
-# %% Extract firing rates for population
-
-# this can be deprecated since it's now defined as a method for a
-# Population dataclass. we can get this functionality back by creating an
-# equivalent staticmethod
-
-
-def get_aligned_rates(popn, align_ev='stimOn', trange=np.array([[-2, 3]]),
-                      binsize=0.05, sm_params={'kind': 'boxcar',
-                                               'binsize': 0.05,
-                                               'width': 0.4, 'sigma': 0.25},
-                      condlabels=['modality', 'coherence', 'heading'],
-                      return_Dataset=False):
-
-    good_trs = popn.events['goodtrial'].to_numpy(dtype='bool')
-    condlist = popn.events[condlabels].loc[good_trs, :]
-
-    rates = []
-    tvecs = []
-    align_lst = []
-
-    for al, t_r in zip(align_ev, trange):
-
-        if popn.events.loc[good_trs, al].isna().all(axis=0).any():
-            raise ValueError(al)
-
-        align = popn.events.loc[good_trs, al].to_numpy(dtype='float64')
-
-        # get spike counts and relevant t_vec for each unit - thanks chatGPT!
-        # trial_psth in list comprehesnsion is going to generate a list of
-        # tuples, the zip(*iter) syntax allows us to unpack the tuples into
-        # separate variables
-        spike_counts, t_vec, _ = \
-            zip(*[(trial_psth(unit.spiketimes, align,
-                              t_r, binsize, sm_params=sm_params))
-                  for unit in popn.units])
-
-        rates.append(np.asarray(spike_counts))
-        tvecs.append(np.asarray(t_vec[0]))
-        # previously tried dict with key as alignment event
-
-        align_lst.append([al]*len(t_vec[0]))
-
-    align_arr = np.concatenate(align_lst)
-    unitlabels = np.array([u.clus_group for u in popn.units])
-    # unit_ids  = np.array([u.clus_id for u in popn.units])
-
-    if return_Dataset:
-        # now construct a dataset
-        arr = xr.DataArray(np.concatenate(rates, axis=2),
-                           coords=[unitlabels,
-                                   condlist.index,
-                                   np.concatenate(tvecs)],
-                           dims=['unit', 'trial', 'time'])
-
-        cond_coords = {condlabels[c]: ('trial', condlist.iloc[:, c])
-                       for c in range(len(condlist.columns))}
-
-        ds = xr.Dataset({'firing_rate': arr},
-                        coords={'align_event': ('time', align_arr),
-                                **cond_coords})
-
-        ds.attrs['rec_date'] = popn.rec_date
-        ds.attrs['area'] = popn.area
-
-        return ds
-
-    else:
-        # return separate vars
-        return rates, tvecs, condlist, align_lst
