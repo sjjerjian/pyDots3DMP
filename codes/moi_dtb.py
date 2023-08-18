@@ -194,6 +194,13 @@ def weightj(j, mu, sigma, sj, s0):
 
     return (-1) ** j * np.exp(mu @ np.linalg.inv(sigma) @ (sj - s0).T)
 
+def corr_num_images(num_images):
+    k = int(np.ceil(num_images / 2))
+    rho = -np.cos(np.pi / k)
+    sigma = np.array([[1, rho], [rho, 1]])
+
+    return sigma, k
+
 
 def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarray, bound=np.array([1, 1]), num_images: int=7):
     """
@@ -206,9 +213,7 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarr
     :param num_images:
     :return:
     """
-    k = int(np.ceil(num_images / 2))
-    rho = -np.cos(np.pi / k)
-    sigma = np.array([[1, rho], [rho, 1]])
+    sigma, k = corr_num_images(num_images)
 
     nx, ny = xmesh.shape
     pdf_result = np.empty((len(tvec), nx, ny))
@@ -253,9 +258,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     TODO see how much changing the difference between bound and bound_marginal affects anything
 
     """
-    k = int(np.ceil(num_images / 2))
-    rho = -np.cos(np.pi / k)
-    sigma = np.array([[1, rho], [rho, 1]])
+    sigma, k = corr_num_images(num_images)
 
     survival_prob = np.ones(len(tvec))
     flux1, flux2 = np.empty(len(tvec)), np.empty(len(tvec))
