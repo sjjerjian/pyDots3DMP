@@ -14,8 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # custom imports
-from NeuralDataClasses import Population, ksUnit, Unit
-from dots3DMP_behavior import dots3DMP_create_trial_list
+from codes.behavior.bhv_descriptive import dots3DMP_create_trial_list
 import dots3DMP_FRutils as FRutils
 
 data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data'

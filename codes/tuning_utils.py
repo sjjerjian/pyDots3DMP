@@ -18,7 +18,7 @@ from scipy.optimize import curve_fit
 from scipy.special import i0
 from scipy.stats import f_oneway, kruskal
 
-from modules.dots3DMP_FRutils import condition_index
+from codes.dots3DMP_FRutils import condition_index
 
 # %% von Mises
 
