@@ -59,13 +59,18 @@ def dots3DMP_create_trial_list(hdgs, mods: list = [1, 2, 3],
 
 
 
+def main():
+    mods = np.array([1, 2, 3])
+    cohs = np.array([1, 2])
+    hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
+    deltas = np.array([-3, 0, 3])
+    nreps = 1
 
-    # mods = np.array([1, 2, 3])
-    # cohs = np.array([1, 2])
-    # hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
-    # deltas = np.array([-3, 0, 3])
-    # nreps = 1
+    trial_table, ntrials = \
+        dots3DMP_create_trial_list(hdgs, mods, cohs, deltas,
+                                   nreps, shuff=False)
 
-    # trial_table, ntrials = \
-    #     dots3DMP_create_trial_list(hdgs, mods, cohs, deltas,
-    #                                nreps, shuff=False)
+    return trial_table, ntrials
+
+if __name__ == '__main__':
+    main()
