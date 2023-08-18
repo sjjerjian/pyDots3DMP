@@ -111,35 +111,33 @@ class AccumulatorModelMOI:
 
         return self
 
+    def dv(self, drift):
+        return moi_dv(tvec=self.tvec, mu=drift, bound=self.bound, num_images=self.num_images)
+
     def dist(self, return_pdf=False):
         self.cdf()
 
         if return_pdf:
-            self.pdf(return_marginals=True).log_posterior_odds()
+            self.pdf(return_marginals=True)
 
         return self
 
-    def plot(self, d_ind=4, include_pdfs=True):
+    def plot(self, d_ind=-1, include_pdfs=True, include_logodds=True):
 
-        has_cdf = hasattr(self, 'p_corr')
-        has_pdf = hasattr(self, 'up_lose_pdf') and include_pdfs
-        has_log = hasattr(self, 'log_odds') and include_pdfs
-
-        if has_cdf:
-            fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
-            axc[0].plot(self.drift_labels, self.p_corr)
-            axc[0].set_xlabel('drift')
+        fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
+        axc[0].plot(self.drift_labels, self.p_corr)
+        axc[0].set_xlabel('drift')
             axc[0].set_xticks(self.drift_labels)
             axc[0].set_ylabel('prob. correct choice')
 
             axc[1].plot(self.tvec, self.rt_dist.T)
             axc[1].legend(self.drift_labels)
             axc[1].set_xlabel('Time (s)')
-            axc[1].set_title('RT distribution (no NDT)')
-            fig_cdf.tight_layout()
+        axc[1].set_title('RT distribution (no NDT)')
+        fig_cdf.tight_layout()
 
-        if has_pdf:
-            fig_pdf, axp = plt.subplots(2+has_log, 1, figsize=(5, 6))
+        if include_pdfs:
+            fig_pdf, axp = plt.subplots(2+include_logodds, 1, figsize=(5, 6))
             contour = axp[0].contourf(self.tvec, self.grid_vec,
                                       log_pmap(np.squeeze(self.up_lose_pdf[d_ind, :, :])).T,
                                       levels=100)
@@ -151,7 +149,7 @@ class AccumulatorModelMOI:
             cbar = fig_cdf.colorbar(contour, ax=axp[0])
             cbar = fig_cdf.colorbar(contour, ax=axp[1])
 
-            if has_log:
+            if include_logodds:
                 vmin, vmax = 0, 3
                 contour = axp[2].contourf(self.tvec, self.grid_vec,
                                           self.log_odds.T, vmin=vmin, vmax=vmax,
@@ -315,6 +313,23 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     pdf_lo = np.diff(flux1)
 
     return p_up, rt_dist
+
+
+def moi_dv(tvec: np.ndarray, mu, s=np.array([1, 1]), bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
+
+    sigma, k = corr_num_images(num_images)
+
+    s_t = s*np.diff(tvec[:2])
+    V = np.diag(s_t) * sigma * np.diag(s_t)
+
+    dv = np.zeros_like(mu)
+    for t in range(1, mu.shape[0]):
+        mvn_dv = mvn(mu[t, :].T, cov=V)
+        dv[t, :] = mvn_dv.rvs()
+
+    dv = dv.cumsum(axis=0)
+
+    return dv
 
 
 def urgency_scaling(mu, tvec, urg):
