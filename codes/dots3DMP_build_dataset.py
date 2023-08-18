@@ -5,12 +5,12 @@ import pandas as pd
 from pathlib import Path, PurePath
 import scipy.io as sio
 import pickle as pkl
-from modules.NeuralDataClasses import Population, ksUnit
+from codes.NeuralDataClasses import Population, ksUnit, PseudoPop
 
 # %% build Population class
 
 
-def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
+def build_rec_popn(subject, rec_date, rec_info, data):
     """
     Parameters
     ----------
@@ -59,7 +59,7 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
         unit = ksUnit(spiketimes=spk_times, amps=np.empty(spk_times.shape),
                       clus_id=data['units']['cluster_id'],
                       clus_group=data['units']['cluster_type'],
-                      clus_label=data['units']['cluster_label'],
+                      clus_label=data['units']['cluster_labels'],
                       channel=data['units']['ch'],
                       depth=data['units']['depth'],
                       rec_date=rec_popn.rec_date, rec_set=rec_popn.rec_set)
@@ -73,7 +73,7 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
                           amps=np.empty(spk_times.shape),
                           clus_id=data['units']['cluster_id'][u],
                           clus_group=data['units']['cluster_type'][u],
-                          clus_label=data['units']['cluster_label'][u],
+                          clus_label=data['units']['cluster_labels'][u],
                           channel=data['units']['ch'][u],
                           depth=data['units']['depth'][u],
                           rec_date=rec_popn.rec_date, rec_set=rec_popn.rec_set)
@@ -108,10 +108,10 @@ def build_rec_popn(subject, rec_date, rec_info, data, data_folder):
 # %%
 
 
-def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
+def build_pseudopop(fr_list, conds_dfs, unitlabels, tvecs=None, areas=None, subject=None):
 
-    cg = np.hstack(unitlabels)
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
+
 
     # stack firing rates, along unit axis, with insertion on time axis according to t_idx
     num_units = np.array([x[0].shape[0] for x in fr_list])
@@ -119,48 +119,53 @@ def build_pseudopop(fr_list, unitlabels, conds_dfs, tvecs):
 
     stacked_frs = []
 
-    # if times are uneven, then add extra NaNs, as determined by comparing tvecs
+    # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
+    # and insert each population fr matrix according to how its tvec lines up with t_unq
+    # need to do this because if we have dynamic start/end references, different sessions might have different lengths
+    # only do it if tvecs is specified, otherwise assume interval averages
+
     t_unq, t_idx = [], []
-    for j in range(len(tvecs[0])):
-        concat_tvecs = [tvecs[i][j] for i in range(len(tvecs))]
-        t_unq.append(np.unique(np.concatenate(concat_tvecs)))
-        t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
-
-        stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
-
-
-        # if we are stacking units with condition averages, then we need to create a c_idx as well to correctly insert matched conditions
-        # and for either case (average or individual trials, we need to keep the conditions)
+    for j in range(len(fr_list[0])):
 
         u_pos = 0
-        for sess in range(len(fr_list)):
-            print(u_pos)
+        if tvecs is not None or fr_list[0][0].ndim == 2:
+            concat_tvecs = [tvecs[i][j] for i in range(len(tvecs))]
+            t_unq.append(np.unique(np.concatenate(concat_tvecs)))
+            t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
 
-            stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
-            u_pos = u_pos + num_units[sess]
+            stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
+            for sess in range(len(fr_list)):
+                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
+                u_pos = u_pos + num_units[sess]
 
+        else:
+            stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
+            for sess in range(len(fr_list)):
+                stacked_frs[j][u_pos:u_pos + num_units[sess], 0:len(conds_dfs[sess])] = fr_list[sess][j]
+                u_pos = u_pos + num_units[sess]
 
+    u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
+    area = [ar for fr, ar in zip(fr_list, areas) for _ in range(fr[0].shape[0])]
+
+    # stacked_conds = [conds_dfs[u] for u in u_idx]
+
+    pseudo_pop = PseudoPop(
+        subject=subject,
+        firing_rates=stacked_frs,
+        timestamps=t_unq,
+        conds=conds_dfs,
+        clus_group=np.hstack(unitlabels),
+        area=area,
+        unit_session=u_idx,
+    )
+
+    return pseudo_pop
     
 
 # %% convert cluster group int into cluster label
 
 
 def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
-    """
-
-    Parameters
-    ----------
-    clus_group : str
-        0, 1, 2, or 3
-    labels : list of strings, optional
-        kilosort label. The default is ['unsorted', 'mua', 'good', 'noise'].
-
-    Returns
-    -------
-    str
-        corresponding label in labels for clus_group
-
-    """
 
     try:
         return labels.index(clus_group)
@@ -173,13 +178,13 @@ def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
 
 if __name__ == '__main__':
 
-    # TODO - clean this up...make it user selectable
+    # TODO - clean this up...make file user selectable?
     # subject = input("Enter subject:")
     subject = 'lucio'
     datapath = '/Volumes/homes/fetschlab/data/'
     data_folder = Path(datapath, subject, f'{subject}_neuro/')
 
-    mat_data_file = 'lucio_20220512-20230411_neuralData.mat'
+    mat_data_file = 'lucio_20220512-20230602_neuralData.mat'
     local_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data/'
 
     m = sio.loadmat(PurePath(local_folder, 'lucio_neuro_datasets',
