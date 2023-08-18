@@ -46,13 +46,14 @@ class AccumulatorModelMOI:
 
             self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
 
+        return self
+
     def set_drifts(self, drifts):
         self.drift_rates = drifts
         self.scale_drift()
+        return self
 
     def __post_init__(self):
-        self.grid_vec = np.arange(-np.max(self.bound)*3, 0, self.grid_spacing)
-
         if len(self.drift_labels) == 0:
             self.drift_labels = np.arange(len(self.drift_rates))
         self.scale_drift()
@@ -127,12 +128,12 @@ class AccumulatorModelMOI:
         fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
         axc[0].plot(self.drift_labels, self.p_corr)
         axc[0].set_xlabel('drift')
-            axc[0].set_xticks(self.drift_labels)
-            axc[0].set_ylabel('prob. correct choice')
+        axc[0].set_xticks(self.drift_labels)
+        axc[0].set_ylabel('prob. correct choice')
 
-            axc[1].plot(self.tvec, self.rt_dist.T)
-            axc[1].legend(self.drift_labels)
-            axc[1].set_xlabel('Time (s)')
+        axc[1].plot(self.tvec, self.rt_dist.T)
+        axc[1].legend(self.drift_labels)
+        axc[1].set_xlabel('Time (s)')
         axc[1].set_title('RT distribution (no NDT)')
         fig_cdf.tight_layout()
 
