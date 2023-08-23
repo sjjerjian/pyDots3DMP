@@ -19,7 +19,7 @@ class AccumulatorModelMOI:
 
     tvec: np.ndarray = field(default=np.arange(0, 2, 0.005))
     grid_spacing: float = field(default=0.025)
-    drift_rates: list = field(default_factory=lambda: [0, 1, 2])
+    drift_rates: list = field(default_factory=list)
     drift_labels: list = field(default_factory=list)
     sensitivity: float = field(default=1)
     urgency: np.ndarray = field(default=0)
@@ -37,26 +37,28 @@ class AccumulatorModelMOI:
     lo_lose_pdf: np.ndarray = np.array([])
     log_odds: np.ndarray = np.array([])
 
-    def scale_drift(self):
+    def _scale_drift(self):
         # if single drift values provided, add corresponding negated value for anti-correlated accumulator
         # also update drift rates based on sensitivity and urgency, if provided
         for d, drift in enumerate(self.drift_rates):
-            if isinstance(drift, (int, float)) or len(drift) == 1:
-                drift = drift * np.array([1, -1])
-
+            drift = drift * np.array([1, -1])
             self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
 
         return self
 
-    def set_drifts(self, drifts):
+    def set_drifts(self, drifts: list, labels=None):
         self.drift_rates = drifts
-        self.scale_drift()
+        self._scale_drift()
+
+        if labels is not None:
+            self.drift_labels = labels
+
         return self
 
     def __post_init__(self):
         if len(self.drift_labels) == 0:
-            self.drift_labels = np.arange(len(self.drift_rates))
-        self.scale_drift()
+             self.drift_labels = np.arange(len(self.drift_rates))
+        self._scale_drift()
 
     def pdf(self, return_marginals=True, return_mesh=True):
 
