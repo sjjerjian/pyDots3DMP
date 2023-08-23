@@ -112,8 +112,8 @@ class AccumulatorModelMOI:
 
         return self
 
-    def dv(self, drift):
-        return moi_dv(tvec=self.tvec, mu=drift, bound=self.bound, num_images=self.num_images)
+    def dv(self, drift, sigma):
+        return moi_dv(mu=drift, s=sigma, num_images=self.num_images)
 
     def dist(self, return_pdf=False):
         self.cdf()
@@ -319,12 +319,11 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     return p_up, rt_dist
 
 
-def moi_dv(tvec: np.ndarray, mu, s=np.array([1, 1]), bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
+def moi_dv(mu, s=np.array([1, 1]), num_images: int = 7):
 
     sigma, k = corr_num_images(num_images)
 
-    s_t = s*np.diff(tvec[:2])
-    V = np.diag(s_t) * sigma * np.diag(s_t)
+    V = np.diag(s) * sigma * np.diag(s)
 
     dv = np.zeros_like(mu)
     for t in range(1, mu.shape[0]):
@@ -392,6 +391,7 @@ def main():
 
     accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
     accum.dist(return_pdf=True).log_posterior_odds().plot()
+
 
 if __name__ == '__main__':
     main()
