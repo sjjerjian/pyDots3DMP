@@ -1,224 +1,422 @@
-
 import numpy as np
 import pandas as pd
 import codes.moi_dtb as dtb
 from codes.behavior.bhv_preprocessing import *
 from codes.behavior.bhv_simulation import dots3DMP_create_trial_list
 import time
+import pickle
 
 from scipy.signal import convolve
-from scipy.stats import norm
-from collections import defaultdict
-from copy import deepcopy
+from scipy.stats import norm, truncnorm
+from collections import defaultdict, OrderedDict
 from pybads import BADS
 
 
-def optim_decorator(loss_func):
-    def wrapper(params, init_params, fixed, *args, **kwargs):
 
-        params = set_params_fixed(params, init_params, fixed)
+
+def main():
+    #data = data_cleanup("lucio", (20220512, 20230605))
+
+    nreps = 200
+    #data, sim_params = generate_fake_data(nreps=nreps, method='simulate', return_wager=True)
+    #with open(f"simdata_202308_{nreps}reps.pkl", "wb") as file:
+    #    pickle.dump((data, sim_params), file, protocol=-1)
+
+    with open(f"../results/simdata_202308_{nreps}reps.pkl", "rb") as file:
+         data, sim_params = pickle.load(file)
+
+    # init_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
+    #                'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
+    init_params = OrderedDict([
+        ('kmult', 15),
+        ('bound', np.array([1, 1])),
+        ('alpha', 0.05),
+        ('theta', [0.8, 0.6, 0.7]),
+        ('ndt', [0.1, 0.3, 0.2]),
+        ('sigma_ndt', 0.06),
+    ])
+    param_keys = list(init_params.keys())
+    #param_keys = ['kmult', 'bound', 'alpha', 'theta', 'ndt', 'sigma_ndt']
+
+    accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
+
+    # provide init_params to target, so that we can hold some fixed, if desired
+    target = lambda params: ddm_2d_objective(params, init_params, fixed, param_keys, data, accum)
+
+    init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
+    lb  = init_params_array * 0.5
+    ub  = init_params_array * 2
+    plb = init_params_array * 0.75
+    pub = init_params_array * 1.5
+
+    fixed = np.ones_like(init_params_array)
+    # fixed[0] = 0
+
+    bads = BADS(target, init_params_array, lb, ub, plb, pub)
+    optimize_result = bads.optimize()
+
+
+def generate_fake_data(sim_params=None, nreps=100, tmax=2, method='simulate', return_wager=False):
+
+    if sim_params is None:
+        sim_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
+                      'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
+
+    mods = np.array([1, 2, 3])
+    mods = np.array([1])
+    cohs = np.array([1, 2])
+    hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
+
+    deltas = np.array([-3, 0, 3])
+
+    trial_table, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
+
+    accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, tmax, 0.005), grid_vec=np.arange(-3, 0, 0.025))
+    model_data_sim, _ = ddm_2d_generate_data(sim_params, data=trial_table, accumulator=accum, method=method, return_wager=return_wager)
+
+    return model_data_sim, sim_params
+
+
+def optim_decorator(loss_func):
+    def wrapper(params, init_params: OrderedDict, fixed: np.ndarray, param_keys: list, *args, **kwargs):
+
+        # params and init_params should be ordered dicts, extract array format
+        # to replace params with init_params where fixed is true
+        init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
+        params_array = set_params_list(params, init_params_array, fixed)
+
+        # convert back to dict for passing to loss function
+        params_dict = OrderedDict()
+        current_index = 0
+        for key, value in init_params.items():
+            if isinstance(value, list):
+                value_length = len(value)
+                params_dict[key] = params_array[current_index:current_index + value_length]
+            elif isinstance(value, np.ndarray):
+                value_length = value.shape[0]
+                params_dict[key] = params_array[current_index:current_index + value_length]
+            else:
+                value_length = 1
+                params_dict[key] = params_array[current_index]
+            current_index += value_length
 
         start_time = time.time()
-        loss_val, _, _ = loss_func(params, *args, **kwargs)
+        loss_val, _, _ = loss_func(params_dict, *args, **kwargs)
         end_time = time.time()
 
-        print(f"Likelihood evaluation time: {end_time-start_time:.2f}s")
+        print(f"Likelihood evaluation time: {end_time - start_time:.2f}s")
         return loss_val
 
     return wrapper
 
 
-def set_params_fixed(params, x0, fixed):
+def set_params_list(params, x0, fixed: np.ndarray = None):
 
     if x0 is not None and (fixed is not None and fixed.sum() > 0):
-        assert x0.shape == params.shape == fixed.shape, "x0 and fixed must match x in shape, if provided"
+        assert x0.shape == params.shape == fixed.shape, "x0 and fixed must match x in shape"
         params = np.array([q if is_fixed else p for p, q, is_fixed in zip(params, x0, fixed)])
+    else:
+        print("initial values x0, or boolean fixed mask not provided")
 
     return params
 
+
+def get_params_array_from_dict(params, param_keys=None):
+
+    if param_keys is not None:
+        params = {key: params[key] for key in param_keys}
+
+    values_list = []
+    for value in params.values():
+        if isinstance(value, (list, np.ndarray)):
+            values_list.extend(value)
+        else:
+            values_list.append(value)
+    return np.array(values_list)
+
+def set_params_dict_from_array():
+    ...
+
 @optim_decorator
-def ddm_2d_objective(params: np.ndarray, data: pd.DataFrame,
+def ddm_2d_objective(params: dict, data: pd.DataFrame,
                      accumulator: dtb.AccumulatorModelMOI = dtb.AccumulatorModelMOI(),
-                     fit_options=None):
+                     outputs=None):
 
-
-    if fit_options is None:
-        fit_options = {'targets': ['choice', 'wager', 'RT'], 'RT_fittype': 'dist', 'fit_delta': False}
+    if outputs is None:
+        outputs = ['choice', 'PDW', 'RT']
 
     # only calculate pdfs if fitting confidence variable
-    return_pdf = ('wager' in fit_options['targets']) or ('multinomial' in fit_options['targets'])
+    return_pdf = 'PDW' in outputs
 
-    # TODO test/check these parameters, wrap with kwargs option to make it more explicit and better tested
-    assert len(params) == 9, "Requires 9 parameters"
+    # get model predictions (probabilistic) given parameters and trial conditions in data
+    model_data, _ = ddm_2d_generate_data(params=params,
+                                      data=data,
+                                      accumulator=accumulator,
+                                      method='probability',
+                                      return_wager=return_pdf)
 
-    kmult, B, theta_ves, theta_vis, theta_comb, alpha, tnd_ves, tnd_vis, tnd_comb = params
-    theta = [theta_ves, theta_vis, theta_comb]
-    tnd = [tnd_ves, tnd_vis, tnd_comb]
+    # calculate log likelihoods of parameters given observed data
 
-    cohs = np.unique(data['coherence'])
+    model_llh = dict()
+    model_llh['choice'] = np.sum(np.log(model_data.loc[data['choice'] == 1, 'choice'])) + \
+                          np.sum(np.log(1 - model_data.loc[data['choice'] == 0, 'choice']))
+    if return_pdf:
+        model_llh['PDW'] = np.sum(np.log(model_data.loc[data['PDW'] == 1, 'PDW'])) + \
+                             np.sum(np.log(1 - model_data.loc[data['PDW'] == 0, 'PDW']))
+
+    # RT likelihood straight from dataframe
+    model_llh['RT'] = np.log(model_data['RT']).sum()
+    model_llh['RT'] /= 10  # seems to be a factor of 10 (roughly) larger than the other two.
+
+    neg_llh = -np.sum(np.array([model_llh[v] for v in outputs if v in model_llh]))
+
+    return neg_llh, model_llh, model_data
+
+
+def ddm_2d_generate_data(params, data: pd.DataFrame(),
+                         accumulator: dtb.AccumulatorModelMOI = dtb.AccumulatorModelMOI(),
+                         method: str = 'simulate',
+                         return_wager: bool = True,
+                         save_dv: bool = False,
+                         ):
+    """
+    Given an accumulator model and trial conditions, this function generates model outputs for behavioral variables.
+    Setting method = 'simulate' will simulate decision variables on individual trials
+    method = 'probability' will return the probabilities of rightward choice and high bet on each trial, and
+       (assume there is already a dataset with actual observed choices, RTs, and wagers)
+    :param params:
+    :param data:
+    :param accumulator:
+    :param method: 'simulate', 'sample', or 'probability'
+    :param return_wager: True or False
+    :param save_dv: True or False
+    :return:
+    """
+
+    # TODO add wager_method options: 'log_odds', 'time', 'evidence'
+    # TODO add cue weighting options: 'optimal', 'random', 'fixed'
+
     mods = np.unique(data['modality'])
+    cohs = np.unique(data['coherence'])
     hdgs = np.unique(data['heading'])
-    deltas = [0]  # by default, don't fit cue conflict separately
+    deltas = np.unique(data['delta'])
 
-    if fit_options['fit_delta']:
-        deltas = np.unique(data['delta'])
+    model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
 
-    kvis = kmult * cohs.T
-    kves = np.mean(kvis)
-
-
-    model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta', 'choice', 'PDW', 'RT']]
-    model_data[['p_right', 'p_high', 'model_rt', 'rt_llh']] = np.nan
+    target_cols = ['choice', 'PDW', 'RT']
+    model_data[target_cols] = np.nan
 
     # TODO this is a placeholder, eventually should be acc, vel (+ additional urgency maybe)
     urg_ves, urg_vis = 1, 1
 
-    # loop over conditions
+    kvis = params['kmult'] * cohs.T
+    kves = np.mean(kvis)  # for now, this means vis and ves do end up with the same log odds map
+    accumulator.bound = params['bound']
+
+    # ====== generate pdfs and log_odds for confidence
+    # loop over modalities. marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
+
+    log_odds_maps = []
+    if return_wager:
+        sin_uhdgs = np.sin(np.deg2rad(hdgs[hdgs >= 0]))
+
+        for m, mod in enumerate(mods):
+
+            if mod == 1:
+                abs_drifts = urg_ves * kves * sin_uhdgs
+
+            elif mod == 2:
+                abs_drifts = urg_vis * np.mean(kvis) * sin_uhdgs
+
+            elif mod == 3:
+                abs_drifts = np.sqrt(urg_ves * kves ** 2 + urg_vis * np.mean(kvis) ** 2) * sin_uhdgs
+
+            # run the method of images dtb to extract pdfs, cdfs, and LPO
+            accumulator.set_drifts(list(abs_drifts), hdgs[hdgs >= 0])
+            accumulator.dist(return_pdf=return_wager).log_posterior_odds()
+            log_odds_maps.append(accumulator.log_odds)
+
+            # TODO this is where we would enforce different confidence mappings - simply by reassigning log_odds_maps / log_odds_above_threshold
+            # if confidence is purely time dependent, then we would set a log odds threshold map that is all ones to the left of threshold, and zeros to the right
+            # if purely evidence dependent, then set it based on grid_vec, 1 below, zero above
+
+        log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
+
+    dt = np.diff(accumulator.tvec[:2])
+    # now to generate model results, loop over all conditions
     for m, mod in enumerate(mods):
-
-        if mod == 1:
-            abs_drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs[hdgs >= 0]))
-            signed_drifts = kves * np.sin(np.deg2rad(hdgs))
-
-        # TODO if we collapse across kvis here, then how can pright vary for different cohs??
-        # i think we collapse across kvis for log odds map, but not for choices/RT...
-        elif mod == 2:
-            abs_drifts = urg_vis * np.mean(kvis) * np.sin(np.deg2rad(hdgs[hdgs >= 0]))
-            signed_drifts = np.mean(kvis) * np.sin(np.deg2rad(hdgs))
-
-        elif mod == 3:
-
-            if not fit_options['fit_delta']:
-                abs_drifts = np.sqrt(urg_ves*kves**2 + urg_vis*np.mean(kvis)**2) * np.sin(np.deg2rad(hdgs[hdgs >= 0]))
-                signed_drifts = np.sqrt(kves**2 + np.mean(kvis)**2) * np.sin(np.deg2rad(hdgs))
-
-        # run the method of images dtb to extract pdfs, cdfs, and LPO
-        # for fitting purposes, sensitivity (and drift) is fixed across coherences
-        accumulator.set_drifts(list(abs_drifts))  # overwrite drift_rates
-        accumulator.drift_labels = hdgs[hdgs >= 0]
-        accumulator.dist(return_pdf=return_pdf)
-        log_odds_above_threshold = accumulator.log_odds >= theta[m]
-        #accumulator.plot()
-
         for c, coh in enumerate(cohs):
-
             for d, delta in enumerate(deltas):
 
-                if delta != 0 and mod < 3:
+                if (delta != 0 and mod < 3) or (c > 0 and mod == 1):
                     continue
 
+                if mod == 1:
+                    drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))\
+
+                    if method == 'simulate':
+                        drifts *= dt
+                        sigma_dv = params['sigma_dv'] * np.sqrt(dt)
+
                 if mod == 2:
-                    abs_drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs[hdgs >= 0]))
-                    signed_drifts = kvis[c] * np.sin(np.deg2rad(hdgs))
+                    drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs))
+
+                    if method == 'simulate':
+                        drifts *= dt
+                        sigma_dv = params['sigma_dv'] * np.sqrt(dt)
 
                 elif mod == 3:
                     w_ves = np.sqrt(kves ** 2 / (kves ** 2 + kvis[c] ** 2))
                     w_vis = np.sqrt(kvis[c] ** 2 / (kves ** 2 + kvis[c] ** 2))
 
                     # +ve delta means ves to the left, vis to the right
-                    drift_ves = kves * np.sin(np.deg2rad(hdgs - delta / 2))
-                    drift_vis = kves * np.sin(np.deg2rad(hdgs + delta / 2))
+                    drift_ves = urg_ves * kves * np.sin(np.deg2rad(hdgs - delta / 2))
+                    drift_vis = urg_ves * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
-                    signed_drifts = w_ves * drift_ves + w_vis * drift_vis
-                    # abs_drifts = np.abs(urg_ves*w_ves*drift_ves + urg_vis*w_vis*drift_vis)
+                    if method == 'simulate':
+                        drift_ves, drift_vis = drift_ves * dt, drift_vis * dt
+                        sigma_dv = np.sqrt(w_ves ** 2 * params['sigma_dv'] ** 2 + w_vis ** 2 * params['sigma_dv'] ** 2)
+                        sigma_dv = sigma_dv * np.sqrt(np.diff(accumulator.tvec[:2]))
 
-                # update cdf to use cdf/deltas
-                accumulator.set_drifts(list(abs_drifts))  # overwrite drift_rates
-                accumulator.cdf()
+                    drifts = w_ves * drift_ves + w_vis * drift_vis
+
+                if method == 'simulate':
+                    sigma_dv = np.array([sigma_dv, sigma_dv])
+
+                # calculate cdf and pdfs using signed drift rates now
+
+                accumulator.set_drifts(list(drifts), hdgs)
+                accumulator.dist(return_pdf=return_wager)
+                print(mod, coh, delta)
 
                 for h, hdg in enumerate(hdgs):
-
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
                                   (data['heading'] == hdg) & (data['delta'] == delta)
 
+                    if trial_index.sum() == 0:
+                        continue
 
-                    # for cue conflict, drift rates are not symmetrical around 0, so we need to use signed heading
-                    if fit_options['fit_delta'] and mod == 3:
-                        uh = h
+                    if method == 'simulate':
+                        these_trials = np.where(trial_index)[0]
+
+                        non_dec_time = truncnorm.rvs(-2, 2, loc=params['ndt'][m], scale=params['sigma_ndt'],
+                                                     size=trial_index.sum())
+
+                        for tr in range(trial_index.sum()):
+                            dv = accumulator.dv(drift=accumulator.drift_rates[h], sigma=sigma_dv)
+
+                            bound_crossed = (dv >= accumulator.bound).any(axis=0)
+                            time_crossed = np.argmax((dv >= accumulator.bound) == 1, axis=0)
+
+                            model_data.loc[these_trials[tr], 'bound_hit'] = bound_crossed.any()
+
+                            if bound_crossed.all():
+                                # both accumulators hit the bound - choice and RT determined by whichever hit first
+                                choice = np.argmin(time_crossed)
+                                rt_ind = np.min(time_crossed)
+                                final_v = dv[rt_ind, choice ^ 1]  # losing accumulator
+
+                            elif ~bound_crossed.any():
+                                # neither accumulator hits the bound
+                                rt_ind = -1
+                                choice = np.argmax(np.argmax(dv, axis=0))  # winner is whoever has max dv value
+                                final_v = accumulator.bound[choice] - (dv[rt_ind, choice] - dv[rt_ind, choice ^ 1])
+                                # log odds map, take distance between winner and loser,
+                                # then shift up as if winner did hit bound, so we can lookup log odds map
+
+                            else:
+                                # only one hits the bound
+                                choice = np.where(bound_crossed)[0].item()
+                                rt_ind = time_crossed[choice]
+                                final_v = dv[rt_ind, choice ^ 1]
+
+                            if return_wager:
+                                grid_ind = np.argmin(np.abs((accumulator.grid_vec + accumulator.bound[choice]) - final_v))
+                                # log_odds = log_odds_maps[m][rt_ind, grid_ind]
+                                wager = int(log_odds_above_threshold[m][rt_ind, grid_ind])  # lookup log odds thres
+                                #wager *= (np.random.random() > params['alpha'])  # incorporate base-rate of low bets
+                                model_data.loc[these_trials[tr], 'PDW'] = wager
+
+                            # flip choice result so that left choices = 0, right choices = 1
+                            model_data.loc[these_trials[tr], 'choice'] = choice ^ 1
+
+                            # RT = decision time + non-decision time
+                            model_data.loc[these_trials[tr], 'RT'] = accumulator.tvec[rt_ind] + non_dec_time[tr]
+
+                            if save_dv:
+                                model_data.loc[these_trials[tr], 'DV'] = dv
+
                     else:
-                        uh = np.abs(hdg) == hdgs[hdgs >= 0]
+                        # otherwise, get model generated predictions
+                        # then either return those directly as probabilities, or sample from them to generate 'trials'
 
-                    if return_pdf:
-                        # select pdf for losing race, given correct or incorrect
-                        pxt_up = np.squeeze(accumulator.up_lose_pdf[uh, :, :])
-                        pxt_lo = np.squeeze(accumulator.lo_lose_pdf[uh, :, :])
-                        total_p = np.sum(pxt_up + pxt_lo)
-                        pxt_up /= total_p
-                        pxt_lo /= total_p
+                        p_right = accumulator.p_corr[h].item()
+                        p_choice = np.array([p_right, 1 - p_right])
 
-                    # use signed drifts, to account for asymmetries in hdg angles around zero, from cue conflict
-                    if signed_drifts[h] < 0:
-                        p_right = 1 - accumulator.p_corr[uh].item()
+                        # ====== WAGER ======
+                        if return_wager:
+                            # select pdf for losing race, given correct or incorrect
+                            pxt_up = np.squeeze(accumulator.up_lose_pdf[h, :, :])
+                            pxt_lo = np.squeeze(accumulator.lo_lose_pdf[h, :, :])
+                            total_p = np.sum(pxt_up + pxt_lo)
+                            pxt_up /= total_p
+                            pxt_lo /= total_p
 
-                        if return_pdf:
-                            # probabilities of four outcomes (intersections e.g. P(right AND high)), sum across grid
-                            # for leftward headings, using pxt_lo (incorrect trials) for p_right
                             p_choice_and_wager = np.array(
-                                [[np.sum(pxt_lo[log_odds_above_threshold]),  # pRight+High
-                                 np.sum(pxt_lo[~log_odds_above_threshold])],  # pRight+Low
-                                [np.sum(pxt_up[log_odds_above_threshold]),   # pLeft+High
-                                 np.sum(pxt_up[~log_odds_above_threshold])]], # pLeft+Low
-                            )
-                    else:
-                        p_right = accumulator.p_corr[uh].item()
-
-                        if return_pdf:
-                            p_choice_and_wager = np.array(
-                                [[np.sum(pxt_up[log_odds_above_threshold]),  # pRight+High
-                                  np.sum(pxt_up[~log_odds_above_threshold])],  # pRight+Low
-                                 [np.sum(pxt_lo[log_odds_above_threshold]),  # pLeft+High
-                                  np.sum(pxt_lo[~log_odds_above_threshold])]],  # pLeft+Low
+                                [[np.sum(pxt_up[log_odds_above_threshold[m]]),  # pRight+High
+                                  np.sum(pxt_up[~log_odds_above_threshold[m]])],  # pRight+Low
+                                 [np.sum(pxt_lo[log_odds_above_threshold[m]]),  # pLeft+High
+                                  np.sum(pxt_lo[~log_odds_above_threshold[m]])]],  # pLeft+Low
                             )
 
+                            # calculate p_wager using Bayes rule, then factor in base rate of low bets ("alpha")
+                            p_choice_given_wager, p_wager = _margconds_from_intersection(p_choice_and_wager, p_choice)
+                            p_wager += np.array([-params['alpha'], params['alpha']]) * p_wager[0]
 
-                    if return_pdf:
-                        p_choice_given_wager, p_wager = margconds_from_intersection(p_choice_and_wager,
-                                                                                    np.array([p_right, 1-p_right]))
+                            if method == 'sample':
+                                model_data.loc[trial_index, 'PDW'] = \
+                                    np.random.choice([1, 0], trial_index.sum(), replace=True, p=p_wager)
+                            else:
+                                model_data.loc[trial_index, 'PDW'] = p_wager[0]
 
-                        # factor in base-rate of low bets
-                        p_wager += np.array([-alpha, alpha])*p_wager[0]
-                        model_data.loc[trial_index, 'p_high'] = p_wager[0]
+                        # ====== CHOICE ======
+                        if method == 'sample':
+                            model_data.loc[trial_index, 'choice'] = \
+                                np.random.choice([1, 0], trial_index.sum(), replace=True, p=p_choice)
+                        else:
+                            model_data.loc[trial_index, 'choice'] = p_right
 
-                    model_data.loc[trial_index, 'p_right'] = p_right
+                        # ====== RT ======
 
-                    # draw sample model RTs based on full RT distribution pdf
-                    # TODO convolve rt_dist with tnd_dist
-                    rt_dist = np.squeeze(accumulator.rt_dist[uh, :])
-                    rt_dist[-1] += (1-rt_dist.sum())  # any missing probability added to final bin...maybe should fix this earlier
-                    model_data.loc[trial_index, 'model_rt'] = \
-                        np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
+                        # convolve model RT distribution with non-decision time
+                        ndt_dist = norm.pdf(accumulator.tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
+                        rt_dist = np.squeeze(accumulator.rt_dist[h, :])
+                        rt_dist = convolve(rt_dist, ndt_dist / ndt_dist.sum())
+                        rt_dist = rt_dist[:len(accumulator.tvec)]
+                        rt_dist /= rt_dist.sum()
 
-                    # likelihood of observed RT is simply the probability at its value in the model RT distribution
-                    actual_rts = model_data.loc[trial_index, 'RT'].values
-                    dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
-                    model_data.loc[trial_index, 'rt_llh'] = rt_dist[dist_inds]
+                        # given RT distribution,
+                        #   sample from distribution (generating fake RTs) if method == 'sample'
+                        #   or store probability of observed RTs, if method == 'probability'
 
-    # calculate log likelihoods
-    model_llh = defaultdict(lambda: 0)
+                        if method == 'sample':
+                            model_data.loc[trial_index, 'RT'] = \
+                                np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
+                        else:
+                            actual_rts = data.loc[trial_index, 'RT'].values
+                            dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
+                            model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
 
-    model_data['p_right'].replace(to_replace=0, value=np.finfo(np.float64).tiny, inplace=True)
-    model_data['p_right'].replace(to_replace=1, value=1-np.finfo(np.float64).tiny, inplace=True)
-    model_data['rt_llh'].replace(to_replace=0, value=np.finfo(np.float64).tiny, inplace=True)
+    # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
+    if method == 'probability':
+        model_data.loc[:, ['choice', 'PDW']].replace(to_replace=0, value=np.finfo(np.float64).tiny, inplace=True)
+        model_data.loc[:, ['choice', 'PDW']].replace(to_replace=1, value=1 - np.finfo(np.float64).tiny, inplace=True)
 
-    model_llh['choice'] = np.sum(np.log(model_data.loc[model_data['choice'] == 1, 'p_right'])) + \
-                          np.sum(np.log(1 - model_data.loc[model_data['choice'] == 0, 'p_right']))
-    if return_pdf:
-        model_data['p_high'].replace(to_replace=0, value=np.finfo(np.float64).tiny, inplace=True)
-        model_data['p_high'].replace(to_replace=1, value=1-np.finfo(np.float64).tiny, inplace=True)
-
-        model_llh['wager'] = np.sum(np.log(model_data.loc[model_data['PDW'] == 1, 'p_high'])) + \
-                             np.sum(np.log(1 - model_data.loc[model_data['PDW'] == 0, 'p_high']))
-
-    # RT likelihood straight from dataframe
-    model_llh['RT'] = np.log(model_data['rt_llh']).sum()
-    model_llh['RT'] /= 10  # seems to be a factor of 10 (roughly) larger than the other two.
-
-    neg_llh = -np.sum(np.array([model_llh[v] for v in fit_options['targets'] if v in model_llh]))
-
-    return neg_llh, model_llh, model_data
+    return model_data, log_odds_maps
 
 
-def margconds_from_intersection(prob_ab, prob_a):
+
+def _margconds_from_intersection(prob_ab, prob_a):
     """
     Given joint probabilites of A and B, and marginal probability of A,
     returns marginal prob of B, and conditional of A given B, according to Bayes theorem
@@ -231,7 +429,7 @@ def margconds_from_intersection(prob_ab, prob_a):
     prob_a = prob_a.reshape(-1, 1)  # make it 2-D, so that the element-wise and matrix mults below work out
 
     # conditional probability
-    b_given_a = (prob_ab/np.sum(prob_ab)) / prob_a
+    b_given_a = (prob_ab / np.sum(prob_ab)) / prob_a
 
     prob_b = prob_a.T @ b_given_a
     a_given_b = b_given_a * prob_a / prob_b
@@ -239,7 +437,7 @@ def margconds_from_intersection(prob_ab, prob_a):
     return a_given_b, prob_b.flatten()
 
 
-def intersection_from_margconds(a_given_b, prob_a, prob_b):
+def _intersection_from_margconds(a_given_b, prob_a, prob_b):
     """
     Recover intersection of a and b using conditionals and marginals, according to Bayes theorem
     Essentially the inverse of margconds_from_intersection, and the two can be used together e.g.
@@ -259,226 +457,5 @@ def intersection_from_margconds(a_given_b, prob_a, prob_b):
 
 
 
-def ddm_2d_generate_data(params, data=pd.DataFrame(),
-                         accumulator: dtb.AccumulatorModelMOI = dtb.AccumulatorModelMOI(),
-                         method='simulate',  # 'simulate', 'sample', or 'probability'
-                         return_wager=True,
-                         ):
-
-    #use one function for generating data from model,
-    # generate simulated trials (method='simulate'), return model probabilities ("
-    # # only calculate pdfs if we ask for
-    # return_pdf = any([t in options['targets'] for t in ['PDW', 'wager', 'multinomial']])
-
-    #we need to be more flexible here, params should be a dict so we know what the keys are
-    #
-    # kmult, B, theta_ves, theta_vis, theta_comb, alpha, tnd_ves, tnd_vis, tnd_comb = params
-    # theta = [theta_ves, theta_vis, theta_comb]
-    # tnd = [tnd_ves, tnd_vis, tnd_comb]
-
-    mods = np.unique(data['modality'])
-    cohs = np.unique(data['coherence'])
-    hdgs = np.unique(data['heading'])
-    deltas = np.unique(data['delta'])
-
-    model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
-
-    target_cols = ['choice', 'PDW', 'RT']
-    model_data[target_cols] = np.nan
-
-    # TODO this is a placeholder, eventually should be acc, vel (+ additional urgency maybe)
-    urg_ves, urg_vis = 1, 1
-
-    kvis = params['kmult'] * cohs.T
-    kves = np.mean(kvis)  # for now, this means vis and ves do end up with the same log odds map
-    accumulator.bound = params['B']
-
-    temp_accumulator = deepcopy(accumulator)
-
-    # ====== generate pdfs and log_odds for confidence
-    # loop over modalities. marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
-
-    if return_wager:
-        sin_uhdgs = np.sin(np.deg2rad(hdgs[hdgs >= 0]))
-
-        log_odds_maps = []
-        for m, mod in enumerate(mods):
-
-            if mod == 1:
-                abs_drifts = urg_ves * kves * sin_uhdgs
-
-            elif mod == 2:
-                abs_drifts = urg_vis * np.mean(kvis) * sin_uhdgs
-
-            elif mod == 3:
-                abs_drifts = np.sqrt(urg_ves*kves**2 + urg_vis*np.mean(kvis)**2) * sin_uhdgs
-
-            # run the method of images dtb to extract pdfs, cdfs, and LPO
-            accumulator.set_drifts(list(abs_drifts))  # overwrite drift_rates
-            accumulator.drift_labels = hdgs[hdgs >= 0]
-            accumulator.dist(return_pdf=return_wager).log_posterior_odds()
-            log_odds_maps.append(accumulator.log_odds)
-        log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
-
-    # now to generate model results, loop over all conditions
-
-    #TODO something is still breaking here, with p_choice having a 0 in it
-    for m, mod in enumerate(mods):
-        for c, coh in enumerate(cohs):
-            for d, delta in enumerate(deltas):
-
-                if (delta != 0 and mod < 3) or (c > 0 and mod > 1):
-                    continue
-
-                if mod == 1:
-                    drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))
-
-                if mod == 2:
-                    drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs))
-
-                elif mod == 3:
-                    w_ves = np.sqrt(kves ** 2 / (kves ** 2 + kvis[c] ** 2))
-                    w_vis = np.sqrt(kvis[c] ** 2 / (kves ** 2 + kvis[c] ** 2))
-
-                    # +ve delta means ves to the left, vis to the right
-                    drift_ves = kves * np.sin(np.deg2rad(hdgs - delta / 2))
-                    drift_vis = kves * np.sin(np.deg2rad(hdgs + delta / 2))
-
-                    drifts = urg_ves * w_ves * drift_ves + urg_ves * w_vis * drift_vis
-
-                # calculate cdf and pdfs using signed drift rates now
-
-                condition_accumulator = temp_accumulator
-                condition_accumulator.set_drifts(list(drifts))
-                condition_accumulator.drift_labels = hdgs
-                condition_accumulator.dist(return_pdf=True)
-                print(drifts)
-
-                for h, hdg in enumerate(hdgs):
-                    print(mod, coh, hdg, delta)
-                    trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
-                                  (data['heading'] == hdg) & (data['delta'] == delta)
-
-                    if method == 'simulate':
-                        for tr in range(trial_index.sum()):
-                            dv = condition_accumulator.dv(drift=condition_accumulator.drift_rates[h])
-
-                    else:
-                        # otherwise, get model generated predictions, then either return those directly, or sample from them
-                        ## Generate model choice, wager and RT for each trial in the dataset
-
-                        p_right = condition_accumulator.p_corr[h].item()
-                        p_choice = np.array([p_right, 1 - p_right])
-
-                        print(hdg, p_right)
-                        if p_right == 1 or p_right == 0:
-                            print("stopping here")
-
-                        # ====== WAGER ======
-                        if return_wager:
-                            # select pdf for losing race, given correct or incorrect
-                            pxt_up = np.squeeze(condition_accumulator.up_lose_pdf[h, :, :])
-                            pxt_lo = np.squeeze(condition_accumulator.lo_lose_pdf[h, :, :])
-                            total_p = np.sum(pxt_up + pxt_lo)
-                            pxt_up /= total_p
-                            pxt_lo /= total_p
-
-                            p_choice_and_wager = np.array(
-                                [[np.sum(pxt_up[log_odds_above_threshold[m]]),  # pRight+High
-                                  np.sum(pxt_up[~log_odds_above_threshold[m]])],  # pRight+Low
-                                 [np.sum(pxt_lo[log_odds_above_threshold[m]]),  # pLeft+High
-                                  np.sum(pxt_lo[~log_odds_above_threshold[m]])]],  # pLeft+Low
-                            )
-
-                            p_choice_given_wager, p_wager = margconds_from_intersection(p_choice_and_wager, p_choice)
-
-                            # factor in base-rate of low bets
-                            p_wager += np.array([-params['alpha'], params['alpha']]) * p_wager[0]
-
-                            if np.any(np.isnan(p_wager)):
-                                print("stopping here")
-
-                            if method == 'sample':
-                                model_data.loc[trial_index, 'PDW'] = np.random.choice([1, 0], trial_index.sum(),
-                                                                                      replace=True, p=p_wager)
-                            else:
-                                model_data.loc[trial_index, 'PDW'] = p_wager[0]
-
-
-                        # ====== CHOICE ======
-                        if method == 'sample':
-                            model_data.loc[trial_index, 'choice'] = np.random.choice([1, 0], trial_index.sum(),
-                                                                                  replace=True, p=p_choice)
-                        else:
-                            model_data.loc[trial_index, 'choice'] = p_right
-
-                        # ====== RT ======
-                        # convolve model RT distribution with non-decision time
-                        ndt_dist = norm.pdf(condition_accumulator.tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
-                        rt_dist = np.squeeze(condition_accumulator.rt_dist[h, :])
-                        rt_dist = convolve(rt_dist, ndt_dist/ndt_dist.sum())
-                        rt_dist = rt_dist[:len(condition_accumulator.tvec)]
-                        rt_dist /= rt_dist.sum()
-
-                        #rt_dist[-1] += (1-rt_dist.sum())  # any missing probability added to final bin...maybe should fix this earlier
-
-                        # given RT distribution, either store probability of observed RTs (if provided), or sample from distribution (for generating fake RTs)
-
-                        try:
-                            if method == 'sample':
-                                model_data.loc[trial_index, 'RT'] = \
-                                    np.random.choice(condition_accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
-                            else:
-                                actual_rts = data.loc[trial_index, 'RT'].values
-                                dist_inds = [np.argmin(np.abs(condition_accumulator.tvec - rt)) for rt in actual_rts]
-                                model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
-                        except:
-                            print("stopping here")
-
-    return model_data, log_odds_maps
-
-
-
-
-
-
-def main():
-
-    data = data_cleanup("lucio", (20220512, 20230605))
-    x0 = np.array([30, 1, 0.8, 0.7, 1.0, 0.05, 0.2, 0.4, 0.3])
-    fixed = np.ones_like(x0)
-
-    accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
-
-    lb = np.array([10, 0.5, 0.5, 0.5, 0.5, 0, 0.15, 0.15, 0.15])
-    ub = np.array([50, 2, 1.3, 1.3, 1.3, 0.1, 0.5, 0.5, 0.5])
-    plb = np.array([20, 0.7, 0.5, 0.5, 0.5, 0, 0.15, 0.15, 0.15])
-    pub = np.array([40, 1.5, 0.5, 0.5, 0.5, 0, 0.15, 0.15, 0.15])
-
-    target = lambda params: ddm_2d_objective(params, x0, fixed, data, accum)
-    bads = BADS(target, x0,)
-    # optimize_result = bads.optimize()
-
-
 if __name__ == '__main__':
-    #main()
-
-    mods = np.array([1, 2, 3])
-    cohs = np.array([1, 2])
-    hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
-    deltas = np.array([-3, 0, 3])
-    nreps = 1
-
-    trial_table, ntrials = \
-        dots3DMP_create_trial_list(hdgs, mods, cohs, deltas,
-                                   nreps, shuff=False)
-
-    accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
-
-    params = {'kmult': 30, 'B': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
-              'ndt': [0.3, 0.5, 0.4], 'sigma_ndt': 0.06}
-    model_data_samp, _ = ddm_2d_generate_data(params, data=trial_table, accumulator=accum, method='sample')
-    model_data_prob, _ = ddm_2d_generate_data(params, data=trial_table, accumulator=accum, method='probability')
-    #model_data_sim, _ = ddm_2d_generate_data(params, data=trial_table, accumulator=accum, method='simulate')
-
-    print("Done")
+    main()
