@@ -1,5 +1,3 @@
-# %% imports
-
 import numpy as np
 import pandas as pd
 from pathlib import Path, PurePath
@@ -10,27 +8,7 @@ from codes.NeuralDataClasses import Population, ksUnit, PseudoPop
 # %% build Population class
 
 
-def build_rec_popn(subject, rec_date, rec_info, data):
-    """
-    Parameters
-    ----------
-    subject : TYPE
-        DESCRIPTION.
-    rec_date : TYPE
-        DESCRIPTION.
-    rec_info : TYPE
-        DESCRIPTION.
-    data : TYPE
-        DESCRIPTION.
-    data_folder : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    rec_popn : TYPE
-        DESCRIPTION.
-
-    """
+def build_rec_popn(subject: str, rec_date, rec_info, data) -> Population:
 
     session = f"{subject}{rec_date}_{rec_info['rec_set']}"
     # filepath = PurePath(data_folder, session)
@@ -112,7 +90,6 @@ def build_pseudopop(fr_list, conds_dfs, unitlabels, tvecs=None, areas=None, subj
 
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
-
     # stack firing rates, along unit axis, with insertion on time axis according to t_idx
     num_units = np.array([x[0].shape[0] for x in fr_list])
     max_trs = max(list(map(len, list(conds_dfs))))
@@ -120,36 +97,37 @@ def build_pseudopop(fr_list, conds_dfs, unitlabels, tvecs=None, areas=None, subj
     stacked_frs = []
 
     # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
-    # and insert each population fr matrix according to how its tvec lines up with t_unq
-    # need to do this because if we have dynamic start/end references, different sessions might have different lengths
-    # only do it if tvecs is specified, otherwise assume interval averages
+    # and insert each population matrix according to how its tvec lines up with t_unq
+    # This is necessary in case of "dynamic" start/end references, different sessions might have different lengths
+    #
+    # only do it if tvecs is specified, otherwise the code returns interval averages
 
     t_unq, t_idx = [], []
     for j in range(len(fr_list[0])):
 
         u_pos = 0
-        if tvecs is not None or fr_list[0][0].ndim == 2:
+        if tvecs is not None:  # or fr_list[0][0].ndim == 2:  # not sure why this was here...
             concat_tvecs = [tvecs[i][j] for i in range(len(tvecs))]
             t_unq.append(np.unique(np.concatenate(concat_tvecs)))
             t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
 
             stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
-            for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
-                u_pos = u_pos + num_units[sess]
+            for ss in range(len(fr_list)):
+                stacked_frs[j][u_pos:u_pos+num_units[ss], 0:len(conds_dfs[ss]), t_idx[j][ss]] = fr_list[ss][j]
+                u_pos = u_pos + num_units[ss]
 
         else:
             stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
-            for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos + num_units[sess], 0:len(conds_dfs[sess])] = fr_list[sess][j]
-                u_pos = u_pos + num_units[sess]
+            for ss in range(len(fr_list)):
+                stacked_frs[j][u_pos:u_pos + num_units[ss], 0:len(conds_dfs[ss])] = fr_list[ss][j]
+                u_pos = u_pos + num_units[ss]
 
     u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
     area = [ar for fr, ar in zip(fr_list, areas) for _ in range(fr[0].shape[0])]
 
     # stacked_conds = [conds_dfs[u] for u in u_idx]
 
-    pseudo_pop = PseudoPop(
+    return PseudoPop(
         subject=subject,
         firing_rates=stacked_frs,
         timestamps=t_unq,
@@ -159,13 +137,11 @@ def build_pseudopop(fr_list, conds_dfs, unitlabels, tvecs=None, areas=None, subj
         unit_session=u_idx,
     )
 
-    return pseudo_pop
-    
 
-# %% convert cluster group int into cluster label
+def get_cluster_label(clus_group: int, labels=None) -> str:
 
-
-def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
+    if labels is None:
+        labels = ['unsorted', 'mua', 'good', 'noise']
 
     try:
         return labels.index(clus_group)
@@ -175,34 +151,18 @@ def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
 
 # %% MAIN
 
+def create_population_data(datafile: str, info_file: str, save_folder='.') -> pd.DataFrame:
 
-if __name__ == '__main__':
-
-    # TODO - clean this up...make file user selectable?
-    # subject = input("Enter subject:")
-    subject = 'lucio'
-    datapath = '/Volumes/homes/fetschlab/data/'
-    data_folder = Path(datapath, subject, f'{subject}_neuro/')
-
-    mat_data_file = 'lucio_20220512-20230602_neuralData.mat'
-    local_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data/'
-
-    m = sio.loadmat(PurePath(local_folder, 'lucio_neuro_datasets',
-                             mat_data_file),
-                    simplify_cells=True)
+    # Load the matlab datastruct
+    m = sio.loadmat(PurePath(save_folder, datafile), simplify_cells=True)
     data = m['dataStruct']
 
-    # https://stackoverflow.com/questions/973473/getting-a-list-of-all-subdirectories-in-the-current-directory
-    # rec_dates = [f.parts[-1] for f in data_folder.iterdir()
-    #             if f.is_dir() and f.parts[-1][0:2] == '20']
-
-    rec_info_file = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/RecSessionInfo.xlsx'
-    rec_info = pd.read_excel(rec_info_file, sheet_name=subject.lower())
+    # and load the Excel info sheet
+    rec_info = pd.read_excel(info_file, sheet_name=subject.lower())
     rec_info = rec_info.convert_dtypes(infer_objects=True)
     rec_info.columns = rec_info.columns.str.lower()
 
-    rec_info['date'] = rec_info['date'].apply(lambda x:
-                                              x.date().strftime('%Y%m%d'))
+    rec_info['date'] = rec_info['date'].apply(lambda x: x.date().strftime('%Y%m%d'))
 
     rec_info.rename(columns={'mdi_depth_um': 'probe_depth',
                              'gt_depth_cm': 'gt_depth',
@@ -215,14 +175,11 @@ if __name__ == '__main__':
     rec_df = rec_info.copy(deep=True)
     rec_df[pars] = pd.NA
 
+    # loop over sessions, and paradigms, insert relevant data from info into df, and build population
     for index, sess in enumerate(data):
 
         rec_date = sess['date']
         rec_set = sess['rec_set']
-
-        print(rec_date, rec_set)
-
-        rec_folder = PurePath(data_folder, rec_date)
 
         rec_sess_info = rec_info.iloc[index, :].to_dict()
         rec_sess_info['chs'] = np.arange(rec_sess_info['min_ch'],
@@ -233,17 +190,32 @@ if __name__ == '__main__':
         if not rec_sess_info['is_good']:
             continue
 
+        print(rec_date, rec_set)
+
         for p, par in enumerate(pars):
 
             if type(sess['data']) == dict and \
                     par_labels[p] in sess['data'].keys():
 
                 rec_popn, events = build_rec_popn(
-                    subject, rec_date, rec_sess_info,
-                    data=sess['data'][par_labels[p]], data_folder=rec_folder)
-
+                    subject, rec_date, rec_sess_info, data=sess['data'][par_labels[p]]
+                )
                 rec_df.loc[index, par] = rec_popn
 
-    filename = PurePath(local_folder, f"{mat_data_file.split('.')[0]}.pkl")
-    with open(filename, 'wb') as file:
-        pkl.dump(rec_df, file)
+    if save_folder is not None:
+        filename = PurePath(save_folder, f"{datafile.split('.')[0]}.pkl")
+        with open(filename, 'wb') as file:
+            pkl.dump(rec_df, file)
+
+    return rec_df
+
+
+if __name__ == '__main__':
+
+    subject = "lucio"
+    save_folder = f"/Users/stevenjerjian/Desktop/FetschLab/Analysis/data/{subject}_neuro_datasets"
+
+    file = "lucio_20220512-20230602_neuralData.mat"
+    info_file = "/Users/stevenjerjian/Desktop/FetschLab/Analysis/info/RecSessionInfo.xlsx"   # TODO add sheet for Lucio
+
+    create_population_data(file, info_file, save_folder)
