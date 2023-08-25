@@ -22,13 +22,10 @@ def prop_se_minmax(x):
     return (np.mean(x)-se, np.mean(x)+se)
 
 
-# %% behavior dataframe operations
-
-def drop_brfix(df, columns="choice"):
+def drop_brfix(df, columns="choice") -> pd.DataFrame:
     return df.dropna(subset=columns, axis=0)
 
-
-def drop_one_targs(df, columns=["oneTargChoice"]):
+def drop_one_targs(df, columns=["oneTargChoice"]) -> pd.DataFrame:
     return df.loc[(df[columns] == 0).all(axis=1), :]
 
 
@@ -44,19 +41,19 @@ def drop_outlierRTs(df, rt_range, metric: str = "precomputed") -> pd.DataFrame:
     min_rt, max_rt = 0, np.inf
 
     if metric == "precomputed":
-        minRT, maxRT = rt_range
+        min_rt, max_rt = rt_range
 
     elif metric == "stdev":
         rt_std = df['RT'].std()
         rt_mu = df['RT'].mean()
-        minRT = np.max(rt_mu - rt_range*rt_std, 0)
-        maxRT = rt_mu + rt_range*rt_std
+        min_rt = np.max(rt_mu - rt_range*rt_std, 0)
+        max_rt = rt_mu + rt_range*rt_std
 
     elif metric == "percentile":
-        prcRT = np.percentile(df['RT'], rt_range)
-        minRT, maxRT = prcRT[0], prcRT[1]
+        prc_rt = np.percentile(df['RT'], rt_range)
+        min_rt, max_rt = prc_rt[0], prc_rt[1]
 
-    return df.loc[(df['RT'] > minRT) & (df['RT'] <= maxRT), :]
+    return df.loc[(df['RT'] > min_rt) & (df['RT'] <= max_rt), :]
 
 
 def bin_conditions(df, bin_ranges, bin_labels) -> pd.DataFrame:
@@ -79,6 +76,7 @@ def zero_one_choice(df) -> pd.DataFrame:
     return df
 
 
+def data_cleanup(subject: str, date_range, drop_cols=None, to_file=False) -> pd.DataFrame:
 def data_cleanup(filename: str, drop_cols=None, save_file: bool = False) -> pd.DataFrame:
 
     # TODO add kwargs for drop and binning parameters below, currently hardcoded...

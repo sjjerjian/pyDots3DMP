@@ -104,13 +104,13 @@ def optim_decorator(loss_func):
         loss_val, _, _ = loss_func(params_dict, *args, **kwargs)
         end_time = time.time()
 
-        print(f"Likelihood evaluation time: {end_time - start_time:.2f}s")
+        print(f"loss:{loss_val:.2f}, time taken: {end_time - start_time:.2f}s")
         return loss_val
 
     return wrapper
 
 
-def set_params_list(params, x0, fixed: np.ndarray = None):
+def set_params_list(params: np.ndarray, x0: np.ndarray, fixed: np.ndarray = None) -> np.ndarray:
 
     if x0 is not None and (fixed is not None and fixed.sum() > 0):
         assert x0.shape == params.shape == fixed.shape, "x0 and fixed must match x in shape"
@@ -121,7 +121,7 @@ def set_params_list(params, x0, fixed: np.ndarray = None):
     return params
 
 
-def get_params_array_from_dict(params, param_keys=None):
+def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndarray:
 
     if param_keys is not None:
         params = {key: params[key] for key in param_keys}
