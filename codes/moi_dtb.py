@@ -1,10 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal as mvn
-from numba import njit, prange
-import numba as nb
-import time
 from dataclasses import dataclass, field
+from functools import lru_cache, wraps
+import time
 
 
 @dataclass(repr=False)
@@ -46,6 +45,11 @@ class AccumulatorModelMOI:
 
         return self
 
+    def __post_init__(self):
+        if len(self.drift_labels) == 0:
+             self.drift_labels = np.arange(len(self.drift_rates))
+        self._scale_drift()
+
     def set_drifts(self, drifts: list, labels=None):
         self.drift_rates = drifts
         self._scale_drift()
@@ -54,11 +58,6 @@ class AccumulatorModelMOI:
             self.drift_labels = labels
 
         return self
-
-    def __post_init__(self):
-        if len(self.drift_labels) == 0:
-             self.drift_labels = np.arange(len(self.drift_rates))
-        self._scale_drift()
 
     def pdf(self, return_marginals=True, return_mesh=True):
 
@@ -105,7 +104,7 @@ class AccumulatorModelMOI:
     def cdf(self):
         p_corr, rt_dist = [], []
         for drift in self.drift_rates:
-            p_up, rt = moi_cdf(tvec=self.tvec, mu=drift, bound=self.bound, num_images=self.num_images)
+            p_up, rt = moi_cdf(self.tvec, drift, self.bound, -0.025, self.num_images)
             p_corr.append(p_up)
             rt_dist.append(rt)
 
@@ -162,6 +161,10 @@ class AccumulatorModelMOI:
             fig_pdf.tight_layout()
 
 
+# ============
+# functions
+# could make these private methods...
+
 def sj_rot(j, s0, k):
     """
 
@@ -205,7 +208,8 @@ def corr_num_images(num_images):
     return sigma, k
 
 
-def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarray, bound=np.array([1, 1]), num_images: int=7):
+def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
+            mu: np.ndarray, bound=np.array([1, 1]), num_images: int=7):
     """
 
     :param xmesh:
@@ -227,22 +231,32 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarr
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
 
-        # start = time.time()
+        start = time.time()
 
-        mu_t = mu[t, :] * tvec[t]
-        sigma_t = sigma * tvec[t]
+        pdf_result[t, :, :] = pdf_at_timestep(tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
 
-        pdf_result[t, :, :] = mvn(mean=s0 + mu_t, cov=sigma_t).pdf(xy_mesh)
-        for j in range(1, k*2):
-            sj = sj_rot(j, s0, k)
-            a_j = weightj(j, mu[t, :].T, sigma, sj, s0)
-            pdf_result[t, :, :] += a_j * mvn(mean=sj + mu_t, cov=sigma_t).pdf(xy_mesh)
+        # pdf_result[t, :, :] = mvn(mean=s0 + mu_t, cov=sigma_t).pdf(xy_mesh)
+        # for j in range(1, k*2):
+        #     sj = sj_rot(j, s0, k)
+        #     a_j = weightj(j, mu[t, :].T, sigma, sj, s0)
+        #     pdf_result[t, :, :] += a_j * mvn(mean=sj + mu_t, cov=sigma_t).pdf(xy_mesh)
 
-        # end = time.time()
+        end = time.time()
         # if t%30 == 0:
-        #    print(f"Time to compute pdf, timestep {t} = {end-start:.4f}")
+        #     print(f"Time to compute pdf, timestep {t} = {end-start:.4f}")
 
     return pdf_result
+
+
+def pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
+
+    pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
+    for j in range(1, k * 2):
+        sj = sj_rot(j, s0, k)
+        a_j = weightj(j, mu.T, sigma, sj, s0)
+        pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
+
+    return pdf
 
 
 def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
@@ -274,6 +288,8 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
 
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
+
+        #start = time.time()
 
         mu_t = mu[t, :].T * tvec[t]
 
@@ -308,6 +324,10 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
         survival_prob[t] = cdf_rest
         flux1[t] = cdf1
         flux2[t] = cdf2
+
+        #end = time.time()
+        # if t%30 == 0:
+        #      print(f"Time to compute cdf, timestep {t} = {end-start:.4f}")
 
     p_up = np.sum(flux2) / np.sum(flux1 + flux2)
 
@@ -387,6 +407,9 @@ def log_pmap(pdf, q=30):
     """
     pdf[pdf < 10**(-q)] = 10**(-q)
     return (np.log10(pdf)+q) / q
+
+
+
 
 
 def main():
