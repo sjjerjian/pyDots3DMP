@@ -104,7 +104,7 @@ class AccumulatorModelMOI:
     def cdf(self):
         p_corr, rt_dist = [], []
         for drift in self.drift_rates:
-            p_up, rt = moi_cdf(self.tvec, drift, self.bound, -0.025, self.num_images)
+            p_up, rt = moi_cdf(self.tvec, drift, self.bound, 0.025, self.num_images)
             p_corr.append(p_up)
             rt_dist.append(rt)
 
@@ -278,7 +278,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     sigma, k = corr_num_images(num_images)
 
     survival_prob = np.ones(len(tvec))
-    flux1, flux2 = np.empty(len(tvec)), np.empty(len(tvec))
+    flux1, flux2 = np.zeros(len(tvec)), np.zeros(len(tvec))
 
     s0 = -bound
     b0, bm = -margin_width, 0
