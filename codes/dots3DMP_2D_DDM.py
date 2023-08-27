@@ -26,8 +26,8 @@ def main():
     # init_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
     #                'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
     init_params = OrderedDict([
-        ('kmult', 5),
-        ('bound', np.array([1, 1])),
+        ('kmult', 0.1),
+        ('bound', np.array([0.5, 0.5])),
         ('alpha', 0.05),
         ('theta', [0.8, 0.6, 0.7]),
         ('ndt', [0.1, 0.3, 0.2]),
@@ -41,23 +41,28 @@ def main():
     # provide init_params to target, so that we can hold some fixed, if desired
 
     init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
-    lb  = init_params_array * 0.1
-    ub  = init_params_array * 10
-    plb = init_params_array * 0.2
-    pub = init_params_array * 5
+    lb = init_params_array * 0.2
+    ub = init_params_array * 5
+    plb = init_params_array * 0.3
+    pub = init_params_array * 3
 
     fixed = np.ones_like(init_params_array)
-    fixed[0] = 0
+    fixed[0:3] = 0
 
-    # target = lambda params: ddm_2d_objective(params, init_params, fixed, param_keys,
-    #                                          data=data, accumulator=accum,
-    #                                          outputs=['choice', 'RT'], llh_scaling=[1, 0.1])
+    target = lambda params: ddm_2d_objective(params, init_params, fixed, param_keys,
+                                             data=data, accumulator=accum,
+                                             outputs=['choice', 'RT'], llh_scaling=[1, 0.1])
 
-    # bads = BADS(target, init_params_array, lb, ub, plb, pub)
-    # reps = bads.optimize()
+    fit_options = {'random_seed': 42}
+    bads = BADS(target, init_params_array, lb, ub, plb, pub, options=fit_options)
+    res = bads.optimize()
 
-    args_tuple = (init_params, fixed, param_keys, data, accum, ['choice', 'RT'], [1, 0.1])
-    res = minimize(ddm_2d_objective, init_params_array, args=args_tuple)
+    # using scipy optimize minimize
+    #args_tuple = (init_params, fixed, param_keys, data, accum, ['choice', 'RT'], [1, 0.1])
+    #fit_options = {'disp': True, 'maxiter': 200, 'xatol': 1e-3, 'fatol': 1e-3, 'adaptive': True}
+
+    # res = minimize(ddm_2d_objective, init_params_array, method='Nelder-Mead',
+    #                args=args_tuple, options=fit_options)
 
     print('Main function done')
 
@@ -139,6 +144,7 @@ def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndar
             values_list.extend(value)
         else:
             values_list.append(value)
+
     return np.array(values_list)
 
 
@@ -148,6 +154,8 @@ def ddm_2d_objective(params: dict,
                      accumulator: dtb.AccumulatorModelMOI = dtb.AccumulatorModelMOI(),
                      outputs=None,
                      llh_scaling=None):
+
+    print(params)
 
     if outputs is None:
         outputs = ['choice', 'PDW', 'RT']
@@ -217,7 +225,7 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
     # TODO this is a placeholder, eventually should be acc, vel
     urg_ves, urg_vis = 1, 1
 
-    kvis = params['kmult'] * cohs.T
+    kvis = params['kmult'] * cohs.T * 100  # scale the parameter up
     kves = np.mean(kvis)  # for now, this means vis and ves do end up with the same log odds map
     accumulator.bound = params['bound']
 
@@ -294,7 +302,6 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                 # calculate cdf and pdfs using signed drift rates now
                 accumulator.set_drifts(list(drifts), hdgs)
                 accumulator.dist(return_pdf=return_wager)
-                print(mod, coh, delta)
 
                 for h, hdg in enumerate(hdgs):
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
