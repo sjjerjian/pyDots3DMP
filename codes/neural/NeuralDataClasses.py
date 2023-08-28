@@ -10,8 +10,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 from datetime import date
 
 from dataclasses import dataclass, field
@@ -59,12 +57,8 @@ class Unit:
     def mean_wf(self):
         ...
 
-    def summary(self, binsize=0.01, max_w=0.2, plot=False):
-    #  isi, corr, ifr, wf_width 2x2 subplots, or just print means
-
-        if plot:
-            isi_y, isi_x = self.isi_hist(binsize=binsize, max_isi=max_w)
-            ifr = self.ifr()                     
+    # def summary(self, binsize=0.01, max=0.2, plot=False):
+    #  isi, corr, ifr, wf_width 2x2 subplots
 
 
 # %% Unit subclass for kilosort data
@@ -76,7 +70,7 @@ class ksUnit(Unit):
     also cluster information, and lab/rig specific info
     """
 
-    # TODO waveforms and templates
+    # TODO
     # wfs: np.ndarray = field(repr=False, default_factory=lambda:
     #    np.zeros(shape=int, dtype=np.float64))
     # template: np.ndarray = field(repr=False, default_factory=lambda:
@@ -95,6 +89,7 @@ class ksUnit(Unit):
     #         int(f"{self.rec_date}{self.rec_set:02d}{self.clus_id:03d}")
 
     # TODO add contam pct
+
 
     # TODO wrap this to allow plotting multiple alignments
     def raster_plot(self, align, condlist, col, hue, **kwargs):
@@ -117,12 +112,12 @@ class Population:
     device: str = ''
 
     pen_num: int = 1
-    grid_xy: tuple[int, int] = field(default=(np.nan, np.nan))
+    grid_xy: tuple[int] = field(default=(np.nan, np.nan))
     grid_type: str = ''
     area: str = ''
 
     mdi_depth: int = field(default=0, metadata={'unit': 'mm'})
-    chs: list = field(default_factory=list, repr=False)
+    chs: list[int] = field(default_factory=list, repr=False)
     sr: float = field(default=30000.0, metadata={'unit': 'Hz'})
 
     units: list[Unit] = field(default_factory=list, repr=False)
@@ -139,7 +134,7 @@ class Population:
 
     def popn_rel_event_times(self, align=['stimOn'], others=['stimOff']):
         self.rel_event_times = rel_event_times(self.events, align, others)
-        return self
+        return self.rel_event_times
 
     def get_firing_rates(self, *args, **kwargs):
         return calc_firing_rates(self.units, self.events, *args, **kwargs)
@@ -170,16 +165,11 @@ class PseudoPop:
     firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False)
 
-    def get_areas(self):
+    # TODO add in events, and alignment times!!
+
+    def get_unique_areas(self):
         return np.unique(self.area)
 
-
-
-
-@dataclass
-class Population_xr:
-    # TODO implement with xarray
-    ...
 
 
 def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
