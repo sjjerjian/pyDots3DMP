@@ -205,11 +205,10 @@ def smooth_counts(raw_fr, params={'type': 'boxcar', 'binsize': 0.02,
     return smoothed_fr
 
 
-
 def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
                       binsize=0.05, sm_params={},
                       condlabels=('modality', 'coherence', 'heading'),
-                      return_dataset=False):
+                      return_ds=False):
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
     condlist = events[condlabels].loc[good_trs, :]
@@ -247,7 +246,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
     # unit_ids  = np.array([u.clus_id for u in popn.units])
 
     # return an xarray Dataset
-    if return_dataset:
+    if return_ds:
         arr = xr.DataArray(np.concatenate(rates, axis=2),
                            coords=[unitlabels,
                                    condlist.index,
@@ -267,6 +266,103 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         return rates, unitlabels, condlist, tvecs, align_lst
 
 
+
+
+def concat_aligned_rates(fr_list, tvecs=None) -> tuple[Union[list, tuple], Union[list, tuple]]:
+
+    if tvecs is not None:
+        # concatenate all different alignments...
+        # but store the lens for later splits
+        len_intervals = [np.asarray(list(map(lambda x: x.size, t)),
+                         dtype='int').cumsum() for t in tvecs]
+        rates_cat = list(map(lambda x: np.concatenate(x, axis=2), fr_list))
+    else:
+        # each 'interval' is length 1 if binsize was set to 0
+        len_intervals = [np.ones(len(r), dtype=int).cumsum() for r in fr_list]
+        rates_cat = list(map(np.dstack, fr_list))
+
+    return rates_cat, len_intervals
+
+
+def lowfr_units(f_rates: np.ndarray, minfr=0) -> np.ndarray:
+
+    # TODO find a way to not exclude units not recorded in all conditions!
+    mean_fr = np.squeeze(np.nanmean(f_rates, axis=1))
+    lowfr_units = np.logical_or(np.isnan(mean_fr), mean_fr <= minfr)
+    lowfr_units = mean_fr <= minfr
+
+    return lowfr_units
+
+
+# %% trial condition helpers
+
+def condition_index(condlist: pd.DataFrame, cond_groups=None) -> tuple[np.ndarray, int, pd.DataFrame]:
+
+    if cond_groups is None:
+        cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0,
+                                    return_inverse=True)
+        cond_groups = pd.DataFrame(cond_groups, columns=condlist.columns)
+
+    else:
+        # cond_groups user-specified
+        assert isinstance(cond_groups, pd.DataFrame)
+        cond_groups = cond_groups.loc[:, condlist.columns]
+
+        # fill with nan?
+        ic = np.full(condlist.shape[0], fill_value=-1, dtype=int)
+        for i, cond in enumerate(cond_groups.values):
+            ic[(condlist == cond).all(axis=1)] = i
+
+    nC = len(cond_groups.index)
+    return ic, nC, cond_groups
+
+
+def condition_averages_ds(ds, *args):
+    # xarray groupby doesn't support multiple columns, this is low priority
+    ...
+
+
+def condition_averages(f_rates, condlist, cond_groups=None) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+
+    ic, nC, cond_groups = condition_index(condlist, cond_groups)
+
+    # condition-averaged arrays will have same number of units and time bins,
+    # so match dim 0 and 2
+    cond_fr = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+    cond_sem = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+
+    for c in range(nC):
+        if np.sum(ic == c):
+            cond_fr[:, c, :] = np.mean(f_rates[:, ic == c, :], axis=1)
+            cond_sem[:, c, :] = np.std(f_rates[:, ic == c, :],
+                                       axis=1) / np.sqrt(np.sum(ic == c))
+
+    return cond_fr, cond_sem, cond_groups
+
+
+def concat_split_wrapper(fr_list, tvecs, func):
+    rates, len_ints = concat_aligned_rates(fr_list, tvecs)
+    #apply func
+    fr_split = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], rates, len_ints))
+
+    # if type == 'avg':
+    #     sns.lineplot(data=df,
+    #                  x='heading', y='spike counts',
+    #                  estimator='mean', errorbar='se', err_style='bars',
+    #                  hue=df[condlabels[:-1]].apply(tuple, axis=1))
+    # elif type == 'time':
+    #     g = sns.relplot(data=df,
+    #                     x='time', y='firing_rate',
+    #                     hue='heading', row='modality', col='align',
+    #                     palette=palette,
+    #                     facet_kws=dict(sharex=False),
+    #                     kind='line', aspect=.75)
+
+
+
+# %% PLOTTING UTILITY FUNCTIONS
+
+# TODO add separate function just for plotting psths, with multiple alignments possible
 
 def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFrame, col: str, hue: str,
                 titles=None, suptitle: str = '', align_label='',
@@ -397,95 +493,3 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
     # plt.show()
 
     return fig, axs
-
-
-def concat_aligned_rates(fr_list, tvecs=None):
-
-    if tvecs is not None:
-        # concatenate all different alignments...
-        # but store the lens for later splits
-        len_intervals = [np.asarray(list(map(lambda x: x.size, t)),
-                         dtype='int').cumsum() for t in tvecs]
-        rates_cat = list(map(lambda x: np.concatenate(x, axis=2), fr_list))
-    else:
-        # each 'interval' is length 1 if binsize was set to 0
-        len_intervals = [np.ones(len(r), dtype=int).cumsum() for r in fr_list]
-        rates_cat = list(map(np.dstack, fr_list))
-
-    return rates_cat, len_intervals
-
-
-def lowfr_units(f_rates: np.ndarray, minfr=0) -> np.ndarray:
-
-    # TODO find a way to not exclude units not recorded in all conditions!
-    mean_fr = np.squeeze(np.nanmean(f_rates, axis=1))
-    lowfr_units = np.logical_or(np.isnan(mean_fr), mean_fr <= minfr)
-    lowfr_units = mean_fr <= minfr
-
-    return lowfr_units
-
-
-# %% trial condition helpers
-
-def condition_index(condlist: pd.DataFrame, cond_groups=None):
-
-    if cond_groups is None:
-        cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0,
-                                    return_inverse=True)
-        cond_groups = pd.DataFrame(cond_groups, columns=condlist.columns)
-
-    else:
-        # cond_groups user-specified
-        assert isinstance(cond_groups, pd.DataFrame)
-        cond_groups = cond_groups.loc[:, condlist.columns]
-
-        # fill with nan?
-        ic = np.full(condlist.shape[0], fill_value=-1, dtype=int)
-        for i, cond in enumerate(cond_groups.values):
-            ic[(condlist == cond).all(axis=1)] = i
-
-    nC = len(cond_groups.index)
-    return ic, nC, cond_groups
-
-
-def condition_averages_ds(ds, *args):
-    # xarray groupby doesn't support multiple columns, this is low priority
-    ...
-
-
-def condition_averages(f_rates, condlist, cond_groups=None):
-
-    ic, nC, cond_groups = condition_index(condlist, cond_groups)
-
-    # condition-averaged arrays will have same number of units and time bins,
-    # so match dim 0 and 2
-    cond_fr = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
-    cond_sem = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
-
-    for c in range(nC):
-        if np.sum(ic == c):
-            cond_fr[:, c, :] = np.mean(f_rates[:, ic == c, :], axis=1)
-            cond_sem[:, c, :] = np.std(f_rates[:, ic == c, :],
-                                       axis=1) / np.sqrt(np.sum(ic == c))
-
-    return cond_fr, cond_sem, cond_groups
-
-
-def concat_split_wrapper(fr_list, tvecs, func):
-    rates, len_ints = concat_aligned_rates(fr_list, tvecs)
-    #apply func
-    fr_split = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], rates, len_ints))
-
-    # if type == 'avg':
-    #     sns.lineplot(data=df,
-    #                  x='heading', y='spike counts',
-    #                  estimator='mean', errorbar='se', err_style='bars',
-    #                  hue=df[condlabels[:-1]].apply(tuple, axis=1))
-    # elif type == 'time':
-    #     g = sns.relplot(data=df,
-    #                     x='time', y='firing_rate',
-    #                     hue='heading', row='modality', col='align',
-    #                     palette=palette,
-    #                     facet_kws=dict(sharex=False),
-    #                     kind='line', aspect=.75)
-
