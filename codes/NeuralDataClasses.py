@@ -167,7 +167,7 @@ class PseudoPop:
     firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False)
 
-    def get_unique_areas(self):
+    def get_areas(self):
         return np.unique(self.area)
 
 

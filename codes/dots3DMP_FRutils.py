@@ -198,7 +198,7 @@ def smooth_counts(raw_fr, params={'type': 'boxcar', 'binsize': 0.02,
         alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
         win = gaussian(N, std=alpha)
         win[:(N//2)-1] = 0
-        win /= np.sum(win)  # renormalize here
+        win /= np.sum(win)  # re-normalize here
 
     smoothed_fr = convolve1d(raw_fr, win, axis=0, mode='nearest')
     return smoothed_fr
@@ -220,19 +220,19 @@ def concat_aligned_rates(fr_list, tvecs=None):
     return rates_cat, len_intervals
 
 
-def lowfr_units(f_rates, minfr=0):
+def lowfr_units(f_rates: np.ndarray, minfr=0) -> np.ndarray:
 
-    mean_fr = np.squeeze(np.mean(f_rates, axis=1))
+    # TODO find a way to not exclude units not recorded in all conditions!
+    mean_fr = np.squeeze(np.nanmean(f_rates, axis=1))
     lowfr_units = np.logical_or(np.isnan(mean_fr), mean_fr <= minfr)
+    lowfr_units = mean_fr <= minfr
 
     return lowfr_units
 
 
 # %% trial condition helpers
 
-def condition_index(condlist, cond_groups=None):
-
-    assert isinstance(condlist, pd.DataFrame)
+def condition_index(condlist: pd.DataFrame, cond_groups=None):
 
     if cond_groups is None:
         cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0,
@@ -254,7 +254,7 @@ def condition_index(condlist, cond_groups=None):
 
 
 def condition_averages_ds(ds, *args):
-    # xarray groupby functions seem a bit clunky, this is low priority
+    # xarray groupby doesn't support multiple columns, this is low priority
     ...
 
 
