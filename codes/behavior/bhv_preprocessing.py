@@ -1,7 +1,7 @@
 
 import numpy as np
 import pandas as pd
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 # %% helper functions
 
@@ -22,16 +22,21 @@ def prop_se_minmax(x):
     return (np.mean(x)-se, np.mean(x)+se)
 
 
+# %% behavior dataframe operations
+
 def drop_brfix(df, columns="choice"):
     return df.dropna(subset=columns, axis=0)
 
+
 def drop_one_targs(df, columns=["oneTargChoice"]):
     return df.loc[(df[columns] == 0).all(axis=1), :]
+
 
 def drop_outlierRTs_bygroup(func):
     def wrapper(df, grp_cols=None, *args, **kwargs):
         return df.groupby(grp_cols).apply(func, *args, **kwargs).reset_index(drop=True)
     return wrapper
+
 
 #@drop_outlierRTs_bygroup
 def drop_outlierRTs(df, rt_range, metric: str = "precomputed") -> pd.DataFrame:
@@ -53,18 +58,20 @@ def drop_outlierRTs(df, rt_range, metric: str = "precomputed") -> pd.DataFrame:
 
     return df.loc[(df['RT'] > minRT) & (df['RT'] <= maxRT), :]
 
+
 def bin_conditions(df, bin_ranges, bin_labels) -> pd.DataFrame:
     for col, bins in bin_ranges.items():
         df[col] = pd.cut(df[col], bins=bins, labels=bin_labels[col])
         df[col] = df[col].astype('float')
     return df
 
-def drop_columns(df, columns):
+
+def drop_columns(df, columns) -> pd.DataFrame:
     df = df.loc[:, ~df.columns.str.startswith('Unnamed')]
     return df.drop(columns, axis=1)
 
 
-def zero_one_choice(df):
+def zero_one_choice(df) -> pd.DataFrame:
     # to make 0..1, like PDW - more convenient for pRight calculations
     # but should type as category for other things!
     if np.max(df['choice']) == 2:
@@ -72,13 +79,14 @@ def zero_one_choice(df):
     return df
 
 
-def data_cleanup(subject: str, date_range, drop_cols=None, to_file=False):
+def data_cleanup(filename: str, drop_cols=None, save_file: bool = False) -> pd.DataFrame:
 
     # TODO add kwargs for drop and binning parameters below, currently hardcoded...
+    # TODO add print statements to explain, allow user-inputs to specify what functions to use?
 
     folder = "/Users/stevenjerjian/Desktop/FetschLab/PLDAPS_data/dataStructs/"
-    filename = f"{subject}_{date_range[0]}-{date_range[-1]}.csv"
-    clean_filename = f"{subject}_{date_range[0]}-{date_range[-1]}_clean.csv"
+   
+    clean_filename = Path(filename).stem + "_clean.csv"
 
     bhv_df = pd.read_csv(PurePath(folder, filename))
 
@@ -106,15 +114,13 @@ def data_cleanup(subject: str, date_range, drop_cols=None, to_file=False):
                     .pipe(bin_conditions, bin_ranges=bins, bin_labels=labels)
                     )
 
-    vescohinds = ((bhv_df_clean['coherence'] == 0.7) & (bhv_df_clean['modality'] == 1))
-    bhv_df_clean.loc[vescohinds, 'coherence'] = bhv_df_clean['coherence'].min()
+    # force all ves to be low coherence, by convention
+    bhv_df_clean.loc[bhv_df_clean['modality'] == 1, 'coherence'] = bhv_df_clean['coherence'].min()
+
+    # convert modality column to category type
     bhv_df_clean['modality'] = bhv_df_clean['modality'].astype('category')
 
-    if to_file:
+    if save_file:
         bhv_df_clean.to_csv(PurePath(folder, clean_filename))
-    else:
-        return bhv_df_clean
-
-
-if __name__ == "__main__":
-    data = data_cleanup("lucio", (20220512, 20230605))
+    
+    return bhv_df_clean
