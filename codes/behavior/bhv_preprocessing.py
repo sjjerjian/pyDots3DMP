@@ -76,7 +76,6 @@ def zero_one_choice(df) -> pd.DataFrame:
     return df
 
 
-def data_cleanup(subject: str, date_range, drop_cols=None, to_file=False) -> pd.DataFrame:
 def data_cleanup(filename: str, drop_cols=None, save_file: bool = False) -> pd.DataFrame:
 
     # TODO add kwargs for drop and binning parameters below, currently hardcoded...
@@ -120,8 +119,8 @@ def data_cleanup(filename: str, drop_cols=None, save_file: bool = False) -> pd.D
 
     if save_file:
         bhv_df_clean.to_csv(PurePath(folder, clean_filename))
-    else:
-        return bhv_df_clean
+    
+    return bhv_df_clean
 
 
 def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
@@ -176,7 +175,3 @@ def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
     trial_table = pd.DataFrame(trial_table, columns=['modality', 'coherence', 'heading', 'delta'])
 
     return trial_table, ntrials
-
-
-if __name__ == "__main__":
-    data = data_cleanup("lucio", (20220512, 20230605))
