@@ -6,16 +6,14 @@ Created on Mon Apr  3 14:19:37 2023
 @author: stevenjerjian
 """
 
-# generate psth over trials(fixed alignements, or time-warping)
-# average psth over conditions
-# fano factor calculations
-# multiple alignments, use map/apply? test in main
-
 # %% imports
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 from scipy.ndimage import convolve1d
 from scipy.signal import gaussian
@@ -27,12 +25,15 @@ from scipy.signal import gaussian
 #    f_rates denotes a unit x trial x time numpy array of firing rates
 #    fr_list denotes a list of f_rates arrays, one per interval/alignment
 
+# freely convert betwene fr_list and f_rates using concat_aligned_rates
+#  
+
 # %% per-trial spike counts/firing rates
 
 
-def trial_psth(spiketimes, align, trange,
-               binsize=0.05, sm_params={},
-               all_trials=False, normalize=True):
+def trial_psth(spiketimes, align, trange = np.array([np.float64, np.float64]),
+               binsize=0.05, sm_params=dict,
+               all_trials=False, normalize: bool = True):
     """
     Parameters
     ----------
@@ -198,13 +199,76 @@ def smooth_counts(raw_fr, params={'type': 'boxcar', 'binsize': 0.02,
         alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
         win = gaussian(N, std=alpha)
         win[:(N//2)-1] = 0
-        win /= np.sum(win)  # renormalize here
+        win /= np.sum(win)  # re-normalize here
 
     smoothed_fr = convolve1d(raw_fr, win, axis=0, mode='nearest')
     return smoothed_fr
 
 
-def concat_aligned_rates(fr_list, tvecs=None):
+def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
+                      binsize=0.05, sm_params={},
+                      condlabels=('modality', 'coherence', 'heading'),
+                      return_ds=False):
+
+    good_trs = events['goodtrial'].to_numpy(dtype='bool')
+    condlist = events[condlabels].loc[good_trs, :]
+
+    rates = []
+    tvecs = []
+    align_lst = []
+
+    for al, t_r in zip(align_ev, trange):
+
+        if events.loc[good_trs, al].isna().all(axis=0).any():
+            raise ValueError(al)
+
+        align = events.loc[good_trs, al].to_numpy(dtype='float64')
+
+        # get spike counts and relevant t_vec for each unit
+        # trial_psth in list comp is going to generate a list of tuples
+        # the zip(*iterable) syntax allows us to unpack the tuples into separate variables
+        spike_counts, t_vec, _ = \
+            zip(*[(trial_psth(unit.spiketimes, align, t_r,
+                                      binsize, sm_params))
+                  for unit in units])
+
+        rates.append(np.asarray(spike_counts))
+        tvecs.append(np.asarray(t_vec[0]))
+
+        # this list may be useful if constructing a large pandas dataframe and then using align_event as a hue
+        if isinstance(al, str):
+            al = [al]
+        align_lst.append([al[0]]*len(t_vec[0]))
+
+    align_arr = np.concatenate(align_lst)
+
+    unitlabels = np.array([u.clus_group for u in units])
+    # unit_ids  = np.array([u.clus_id for u in popn.units])
+
+    # return an xarray Dataset
+    if return_ds:
+        arr = xr.DataArray(np.concatenate(rates, axis=2),
+                           coords=[unitlabels,
+                                   condlist.index,
+                                   np.concatenate(tvecs)],
+                           dims=['unit', 'trial', 'time'])
+
+        cond_coords: dict = {condlabels[c]: ('trial', condlist.iloc[:, c])
+                       for c in range(len(condlist.columns))}
+
+        ds = xr.Dataset({'firing_rate': arr},
+                        coords={'align_event': ('time', align_arr),
+                                **cond_coords})
+        return ds
+
+    else:
+        # return separate vars
+        return rates, unitlabels, condlist, tvecs, align_lst
+
+
+
+
+def concat_aligned_rates(fr_list, tvecs=None) -> tuple[Union[list, tuple], Union[list, tuple]]:
 
     if tvecs is not None:
         # concatenate all different alignments...
@@ -220,19 +284,19 @@ def concat_aligned_rates(fr_list, tvecs=None):
     return rates_cat, len_intervals
 
 
-def lowfr_units(f_rates, minfr=0):
+def lowfr_units(f_rates: np.ndarray, minfr=0) -> np.ndarray:
 
-    mean_fr = np.squeeze(np.mean(f_rates, axis=1))
+    # TODO find a way to not exclude units not recorded in all conditions!
+    mean_fr = np.squeeze(np.nanmean(f_rates, axis=1))
     lowfr_units = np.logical_or(np.isnan(mean_fr), mean_fr <= minfr)
+    lowfr_units = mean_fr <= minfr
 
     return lowfr_units
 
 
 # %% trial condition helpers
 
-def condition_index(condlist, cond_groups=None):
-
-    assert isinstance(condlist, pd.DataFrame)
+def condition_index(condlist: pd.DataFrame, cond_groups=None) -> tuple[np.ndarray, int, pd.DataFrame]:
 
     if cond_groups is None:
         cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0,
@@ -254,11 +318,11 @@ def condition_index(condlist, cond_groups=None):
 
 
 def condition_averages_ds(ds, *args):
-    # xarray groupby functions seem a bit clunky, this is low priority
+    # xarray groupby doesn't support multiple columns, this is low priority
     ...
 
 
-def condition_averages(f_rates, condlist, cond_groups=None):
+def condition_averages(f_rates, condlist, cond_groups=None) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
 
     ic, nC, cond_groups = condition_index(condlist, cond_groups)
 
@@ -274,6 +338,7 @@ def condition_averages(f_rates, condlist, cond_groups=None):
                                        axis=1) / np.sqrt(np.sum(ic == c))
 
     return cond_fr, cond_sem, cond_groups
+
 
 def concat_split_wrapper(fr_list, tvecs, func):
     rates, len_ints = concat_aligned_rates(fr_list, tvecs)
@@ -293,3 +358,138 @@ def concat_split_wrapper(fr_list, tvecs, func):
     #                     facet_kws=dict(sharex=False),
     #                     kind='line', aspect=.75)
 
+
+
+# %% PLOTTING UTILITY FUNCTIONS
+
+# TODO add separate function just for plotting psths, with multiple alignments possible
+
+def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFrame, col: str, hue: str,
+                titles=None, suptitle: str = '', align_label='',
+                other_evs=None, other_ev_labels=None,  # TODO, not yet implemented
+                trange: np.ndarray = np.array([-2, 3]),
+                cmap=None, hue_norm=(-12, 12), binsize: int = 0.05, sm_params=None):
+
+    if sm_params is None:
+        sm_params = dict()
+
+    df = condlist[col].copy()
+    df[hue] = condlist.loc[:, hue]
+
+    # stimOn update to motionOn, time of actual true motion
+    if align_label == 'stimOn':
+        align += 0.3
+
+    fr, x, df['spks'] = trial_psth(spiketimes, align, trange,
+                                           binsize=binsize,
+                                           sm_params=sm_params)
+
+    # if col is a list (i.e. 1 or more conditions), create a new grouping
+    # column with unique condition groups. otherwise, just use that column
+    if isinstance(col, list):
+        ic, nC, cond_groups = condition_index(df[col])
+        df['grp'] = ic
+    else:
+        nC = len(np.unique(df[col]))
+        df['grp'] = df[col]
+
+    fig, axs = plt.subplots(nrows=2,  ncols=nC,  figsize=(20, 6))
+    fig.suptitle(suptitle)
+    fig.supxlabel(f'Time relative to {align_label} [s]')
+
+    # set hue colormap
+    uhue = np.unique(df[hue])
+    if cmap is None:
+        if hue == 'heading':
+            cmap = 'RdBu'
+        elif hue == 'choice_wager':
+            cmap = 'Paired'
+        cmap = mpl.colormaps[cmap]
+
+    if isinstance(hue_norm, tuple):
+        hue_norm = mpl.colors.Normalize(vmin=hue_norm[0],
+                                        vmax=hue_norm[1])
+        # hue_norm = mpl.colors.BoundaryNorm(uhue, cmap.N, extend='both')
+    # this doesn't work with cmap selection below yet...
+
+    for c, cond_df in df.groupby('grp'):
+
+        ctitle = cond_groups.iloc[c, :]
+        ctitle = ', '.join([f'{t}={v:.0f}' for t, v in
+                           zip(ctitle.index, ctitle.values)])
+
+        # this time, create groupings based on hue, within cond_df
+        ic, nC, cond_groups = condition_index(cond_df[[hue]])
+
+        # need to call argsort twice!
+        # https://stackoverflow.com/questions/31910407/
+        order = np.argsort(np.argsort(ic)).tolist()
+
+        # TODO further sort within cond by user-specified input e.g. RT
+
+        # get color for each trial, based on heading, convert to list
+        colors = cmap(hue_norm(cond_df[hue]).data.astype('float'))
+        colors = np.split(colors, colors.shape[0], axis=0)
+
+        # ==== raster plot ====
+        # no need to re-order all the lists, just use order for lineoffsets
+        ax = axs[0, c]
+        ax.eventplot(cond_df['spks'], lineoffsets=order, color=colors)
+        ax.set_ylim(-0.5, len(cond_df['spks'])+0.5)
+        ax.invert_yaxis()
+        ax.set_xlim(trange[0], trange[1])
+
+        if titles is None:
+            ax.set_title(ctitle)
+        else:
+            ax.set_title(titles[c])
+
+        if c == 0:
+            ax.set_ylabel('trial')
+        else:
+            ax.set_yticklabels([])
+
+        # ==== PSTH plot ====
+        ax = axs[1, c]
+
+        # get the time-res fr for this condition too
+        cond_fr = fr[df['grp'] == c, :]
+
+        cond_colors = cmap(hue_norm(
+            cond_groups.loc[:, hue]).data.astype('float'))
+
+        cond_mean_fr = np.full([nC, cond_fr.shape[1]], np.nan)
+        cond_sem_fr = np.full([nC, cond_fr.shape[1]], np.nan)
+
+        for hc in range(nC):
+            cond_mean_fr[hc, :] = cond_fr[ic == hc, :].mean(axis=0)
+            cond_sem_fr[hc, :] = \
+                cond_fr[ic == hc, :].std(axis=0) / np.sum(ic == hc)
+
+            ax.plot(x, cond_mean_fr[hc, :], color=cond_colors[hc, :])
+
+        # for seaborn use
+        # # set colors for unique headings, with same mapping as raster
+        # colors = cmap(hue_norm(np.unique(c_df[hue])).data.astype('float'))
+        # colors = np.split(colors, colors.shape[0], axis=0)
+        # sns.lineplot(x=c_df['time'], y=c_df['fr'],
+        #              hue=hue_group, palette=colors,
+        #              ax=ax, legend=False, errorbar=None)
+
+        ax.set_xlim(trange[0], trange[1])
+        if c == 0:
+            ax.set_ylabel('spikes/sec')
+        else:
+            ax.set_yticklabels([])
+            ax.set_ylabel('')
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=hue_norm)
+    # sm.set_array([])
+    # cbar_ax = fig.add_axes([0.1, 0.1, 0.05, 0.8])
+    # cbar = plt.colorbar(sm, ticks=list(uhue))
+    cbar = plt.colorbar(sm)
+    cbar.set_label(hue)
+
+    # plt.show()
+
+    return fig, axs
