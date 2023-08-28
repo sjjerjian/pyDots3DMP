@@ -28,14 +28,15 @@ def drop_brfix(df, columns="choice"):
 def drop_one_targs(df, columns=["oneTargChoice"]):
     return df.loc[(df[columns] == 0).all(axis=1), :]
 
-
 def drop_outlierRTs_bygroup(func):
-    def wrapper(df, grp_cols, *args, **kwargs):
+    def wrapper(df, grp_cols=None, *args, **kwargs):
         return df.groupby(grp_cols).apply(func, *args, **kwargs).reset_index(drop=True)
     return wrapper
 
-@drop_outlierRTs_bygroup
-def drop_outlierRTs(df, rt_range, metric="precomputed"):
+#@drop_outlierRTs_bygroup
+def drop_outlierRTs(df, rt_range, metric: str = "precomputed") -> pd.DataFrame:
+
+    min_rt, max_rt = 0, np.inf
 
     if metric == "precomputed":
         minRT, maxRT = rt_range
@@ -52,10 +53,10 @@ def drop_outlierRTs(df, rt_range, metric="precomputed"):
 
     return df.loc[(df['RT'] > minRT) & (df['RT'] <= maxRT), :]
 
-
-def bin_conditions(df, columns, bin_ranges, bin_labels):
-    for c, col in enumerate(columns):
-        df[col] = pd.cut(df[col], bins=bin_ranges[c], labels=bin_labels[c])
+def bin_conditions(df, bin_ranges, bin_labels) -> pd.DataFrame:
+    for col, bins in bin_ranges.items():
+        df[col] = pd.cut(df[col], bins=bins, labels=bin_labels[col])
+        df[col] = df[col].astype('float')
     return df
 
 def drop_columns(df, columns):
@@ -81,28 +82,32 @@ def data_cleanup(subject: str, date_range, drop_cols=None, to_file=False):
 
     bhv_df = pd.read_csv(PurePath(folder, filename))
 
-    bins = [[0, 0.5, 1],
-            [-14, -8, -4, -2, -1, 1, 2, 4, 8, 14],
-            [-5, -2, 2, 5]]
-    labels = [[0.2, 0.7],
-             [-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12],
-             [-3, 0, 3]]
+    bins = {
+        'coherence': [0, 0.5, 1],
+        'heading': [-14, -8, -4, -2, -1, 1, 2, 4, 8, 14],
+        'delta': [-5, -2, 2, 5],
+    }
+    labels = {
+        'coherence': [0.2, 0.7],
+        'heading': [-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12],
+        'delta': [-3, 0, 3],
+    }
 
     if drop_cols is None:
         drop_cols = ["TargMissed", "confRT", "insertTrial", "filename", "subj", "trialNum",
                         "amountRewardLowConfOffered", "amountRewardHighConfOffered", "reward"]
 
     bhv_df_clean = (bhv_df
-                    .pipe(drop_brfix)
+                    .pipe(drop_brfix, columns=['choice', 'PDW'])
                     .pipe(drop_one_targs)
                     .pipe(zero_one_choice)
                     .pipe(drop_columns, columns=drop_cols)
-                    .pipe(drop_outlierRTs, grp_cols=['modality'], rt_range=(0.25, 2))
-                    .pipe(bin_conditions, columns=['coherence','heading','delta'], bin_ranges=bins, bin_labels=labels)
+                    .pipe(drop_outlierRTs, rt_range=(0.25, 2))
+                    .pipe(bin_conditions, bin_ranges=bins, bin_labels=labels)
                     )
 
-    bhv_df_clean['heading'] = bhv_df_clean['heading'].astype('float')
-    bhv_df_clean['delta'] = bhv_df_clean['delta'].astype('float')
+    vescohinds = ((bhv_df_clean['coherence'] == 0.7) & (bhv_df_clean['modality'] == 1))
+    bhv_df_clean.loc[vescohinds, 'coherence'] = bhv_df_clean['coherence'].min()
     bhv_df_clean['modality'] = bhv_df_clean['modality'].astype('category')
 
     if to_file:
