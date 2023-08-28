@@ -26,37 +26,42 @@ def main():
     # init_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
     #                'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
     init_params = OrderedDict([
-        ('kmult', 0.1),
-        ('bound', np.array([0.5, 0.5])),
-        ('alpha', 0.05),
-        ('theta', [0.8, 0.6, 0.7]),
+        ('kmult', 0.15),
+        ('bound', np.array([1, 1])),
+        ('alpha', 0),
+        ('theta', [1.5, 1.5, 1.5]),
         ('ndt', [0.1, 0.3, 0.2]),
         ('sigma_ndt', 0.06),
     ])
     param_keys = list(init_params.keys())
-    #param_keys = ['kmult', 'bound', 'alpha', 'theta', 'ndt', 'sigma_ndt']
 
     accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, 2, 0.02), grid_vec=np.arange(-3, 0, 0.025))
 
-    # provide init_params to target, so that we can hold some fixed, if desired
-
     init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
-    lb = init_params_array * 0.2
-    ub = init_params_array * 5
-    plb = init_params_array * 0.3
-    pub = init_params_array * 3
+    # lb = init_params_array * 0.2
+    # ub = init_params_array * 5
+    # plb = init_params_array * 0.3
+    # pub = init_params_array * 3
+
+    lb = np.array([0.1, 0.95, 0.95, 0, 0.5, 0.5, 0.5, 0.05, 0.05, 0.05, 0])
+    ub = np.array([0.2, 1.05, 1.05, 0.15, 1.5, 1.5, 1.5, 0.5, 0.5, 0.5, 0.2])
+
+    plb = np.array([0.14, 0.98, 0.98, 0, 0.6, 0.6, 0.6, 0.1, 0.1, 0.1, 0])
+    pub = np.array([0.16, 1.02, 1.02, 0.1, 1, 1, 1, 0.3, 0.3, 0.3, 0.1])
 
     fixed = np.ones_like(init_params_array)
-    fixed[0:3] = 0
+    #fixed[0:3] = 0  # fitting kmult and bound only
+    fixed[:-1] = 0
 
     target = lambda params: ddm_2d_objective(params, init_params, fixed, param_keys,
                                              data=data, accumulator=accum,
-                                             outputs=['choice', 'RT'], llh_scaling=[1, 0.1])
+                                             outputs=['choice', 'PDW', 'RT'], llh_scaling=[1, 1, 0.1])
 
     fit_options = {'random_seed': 42}
     bads = BADS(target, init_params_array, lb, ub, plb, pub, options=fit_options)
     res = bads.optimize()
 
+    # TODO plot fit results - 'rerun' objective with params held fixed and a continuous range of headings
     # using scipy optimize minimize
     #args_tuple = (init_params, fixed, param_keys, data, accum, ['choice', 'RT'], [1, 0.1])
     #fit_options = {'disp': True, 'maxiter': 200, 'xatol': 1e-3, 'fatol': 1e-3, 'adaptive': True}
@@ -199,7 +204,7 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
     Setting method = 'simulate' will simulate decision variables on individual trials
     method = 'probability' will return the probabilities of rightward choice and high bet on each trial, and
        (assume there is already a dataset with actual observed choices, RTs, and wagers)
-    :param params:
+    :param params: parameters dictionary
     :param data:
     :param accumulator:
     :param method: 'simulate', 'sample', or 'probability'
@@ -211,6 +216,7 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
     # TODO urgency and ves/vis scaling
     # TODO add wager_method options: 'log_odds', 'time', 'evidence'
     # TODO add cue weighting options: 'optimal', 'random', 'fixed'
+    # TODO unit tests
 
     mods = np.unique(data['modality'])
     cohs = np.unique(data['coherence'])
@@ -218,11 +224,9 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
     deltas = np.unique(data['delta'])
 
     model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
+    model_data[['choice', 'PDW', 'RT']] = np.nan
 
-    target_cols = ['choice', 'PDW', 'RT']
-    model_data[target_cols] = np.nan
-
-    # TODO this is a placeholder, eventually should be acc, vel
+    # this is a placeholder, eventually should be acc, vel
     urg_ves, urg_vis = 1, 1
 
     kvis = params['kmult'] * cohs.T * 100  # scale the parameter up
@@ -258,7 +262,9 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
 
         log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
 
+    # TODO make dt an attribute of accumulator
     dt = np.diff(accumulator.tvec[:2])
+
     # now to generate model results, loop over all conditions
     for m, mod in enumerate(mods):
         for c, coh in enumerate(cohs):
@@ -366,9 +372,9 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
 
                         p_right = accumulator.p_corr[h].item()
 
-                        if p_right == 0:
+                        if p_right <= 0:
                             p_right = 1e-10
-                        elif p_right == 1:
+                        elif p_right >= 1:
                             p_right -= 1e-10
 
                         p_choice = np.array([p_right, 1 - p_right])
