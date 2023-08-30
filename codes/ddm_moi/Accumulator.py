@@ -25,7 +25,7 @@ class AccumulatorModelMOI:
     bound: np.ndarray = np.array([1, 1])  # TODO allow to be int, then duplicate
     num_images: int = 7
 
-    # TODO clean this up a bit, if we can
+    # TODO clean this up a bit, if we can?
     grid_vec: np.ndarray = np.array([])
     grid_xmesh: np.ndarray = np.array([])
     grid_ymesh: np.ndarray = np.array([])
@@ -35,6 +35,8 @@ class AccumulatorModelMOI:
     up_lose_pdf: np.ndarray = np.array([])
     lo_lose_pdf: np.ndarray = np.array([])
     log_odds: np.ndarray = np.array([])
+
+    dt: int = field(init=False)
 
     def _scale_drift(self):
         # if single drift values provided, add corresponding negated value for anti-correlated accumulator
@@ -46,6 +48,12 @@ class AccumulatorModelMOI:
         return self
 
     def __post_init__(self):
+
+        self.dt = np.diff(self.tvec[:2])
+
+        if isinstance(self.bound, (int, float)):
+            self.bound = np.array([self.bound, self.bound])
+
         if len(self.drift_labels) == 0:
              self.drift_labels = np.arange(len(self.drift_rates))
         self._scale_drift()
