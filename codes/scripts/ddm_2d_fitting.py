@@ -3,7 +3,7 @@
 import numpy as np
 import pickle
 
-from ddm_moi import Accumulator
+from ddm_moi.Accumulator import AccumulatorModelMOI
 from ddm_moi.ddm_2d import *
 
 from behavior.preprocessing import dots3DMP_create_trial_list
@@ -25,7 +25,7 @@ deltas = np.array([-3, 0, 3])
 nreps = 200
 trial_table, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
 
-accum = Accumulator.AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
+accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
 sim_data, _ = ddm_2d_generate_data(sim_params, data=trial_table, 
                                          accumulator=accum, method='simulate', return_wager=True)
 
@@ -33,18 +33,19 @@ with open(f"../data/sim_behavior_202308_{nreps}reps.pkl", "wb") as file:
     pickle.dump((sim_data, sim_params), file, protocol=-1)
 
 
-# %% load data and initialize objective function
+# %% ===== load data =====
 
-filename = f"../data/sim_behavior_202308_{nreps}reps.pkl" # replace with real data
+nreps = 200
 
-with open(f"../data/sim_behavior_202308_{nreps}reps.pkl", "rb") as file:
+filename = f"../../data/sim_behavior_202308_{nreps}reps.pkl" # replace with real data
+
+with open(f"../../data/sim_behavior_202308_{nreps}reps.pkl", "rb") as file:
     data, sim_params = pickle.load(file)
 
-# initialize accumulator
+# initialize accumulator
 accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.05), grid_vec=np.arange(-3, 0, 0.025))
 
-# TODO should be able to set init_params as regular dict, and order it 
-# set initial parameters for optimization
+# %% ===== set parameters for optimization =====
 
 # first fitting choice and RT only
 init_params = {'kmult': 0.3, 'bound': np.array([0.5, 0.5]), 'ndt': [0.3, 0.3, 0.3], 'sigma_ndt': 0.06}
@@ -96,9 +97,10 @@ bads_result = bads.optimize()  # not bad...
 # %% now take the fitted parameters, and generate predicted data for the same conditions as observed data
 
 fitted_params = {
-    'kmult': 0.3, 'bound': np.array([0.5, 0.5]), 'ndt': [0.3, 0.3, 0.3], 'sigma_ndt': 0.06,
-    'alpha': 0.05, 'theta': [0.8, 0.6, 0.7], 
-}
+    'kmult': 15, 'bound': np.array([1, 1]),
+    'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
+    'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06
+    }
 
 # fitted_params = OrderedDict([
 #     ('kmult', 0.1264528),
@@ -121,16 +123,21 @@ hdgs = np.array(np.linspace(-12, 12, num_hdgs))  # to plot a smooth fit
 deltas = np.array([-3, 0, 3])
 data_pred, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
 
+
+# TODO address Runtime warnings in cdf calculations...shouldn't be getting inf/nans
 model_data, _ = ddm_2d_generate_data(params=fitted_params, data=data_pred,
                                      accumulator=accum, 
-                                     method=pred_method rt_method=rt_method,
-                                     return_wager=True,
+                                     method=pred_method, rt_method=rt_method,
+                                     return_wager=False,
                                      )
+
+
+# %%
 
 # actual means from the data
 by_conds = ['modality', 'coherence', 'heading', 'delta']
 data_means = behavior_means(data, by_conds=by_conds)
-pred_means = behavior_means(data_pred, by_conds=by_conds) # technically redundant if nreps = 1
+pred_means = behavior_means(model_data, by_conds=by_conds) # technically redundant if nreps = 1
 
 # TODO plot it
 
@@ -140,3 +147,4 @@ pred_means = behavior_means(data_pred, by_conds=by_conds) # technically redunda
 
 
 print('Main done')
+# %%

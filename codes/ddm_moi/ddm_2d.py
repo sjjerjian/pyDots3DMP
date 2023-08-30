@@ -206,9 +206,7 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
 
         log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
 
-    # TODO make dt an attribute of accumulator
-    dt = np.diff(accumulator.tvec[:2])
-
+    print('generating model results')
     # now to generate model results, loop over all conditions
     for m, mod in enumerate(mods):
         for c, coh in enumerate(cohs):
@@ -217,19 +215,21 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                 if (delta != 0 and mod < 3) or (c > 0 and mod == 1):
                     continue
 
+                print(mod, coh, delta)
+
                 if mod == 1:
                     drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))
 
                     if method == 'simulate' or method == 'sim':
-                        drifts *= dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(dt)
+                        drifts *= accumulator.dt
+                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
                 if mod == 2:
                     drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs))
 
                     if method == 'simulate' or method == 'sim':
-                        drifts *= dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(dt)
+                        drifts *= accumulator.dt
+                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
                 elif mod == 3:
                     w_ves = np.sqrt(kves ** 2 / (kves ** 2 + kvis[c] ** 2))
@@ -240,9 +240,9 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                     drift_vis = urg_ves * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
                     if method == 'simulate' or method == 'sim':
-                        drift_ves, drift_vis = drift_ves * dt, drift_vis * dt
+                        drift_ves, drift_vis = drift_ves * accumulator.dt, drift_vis * accumulator.dt
                         sigma_dv = np.sqrt(w_ves ** 2 * params['sigma_dv'] ** 2 + w_vis ** 2 * params['sigma_dv'] ** 2)
-                        sigma_dv = sigma_dv * np.sqrt(np.diff(accumulator.tvec[:2]))
+                        sigma_dv = sigma_dv * np.sqrt(accumulator.dt)
 
                     drifts = w_ves * drift_ves + w_vis * drift_vis
 
