@@ -1,91 +1,34 @@
 import numpy as np
 import pandas as pd
-import codes.moi_dtb as dtb
-from codes.behavior.bhv_preprocessing import *
-from codes.behavior.bhv_simulation import dots3DMP_create_trial_list
 import time
-import pickle
 
 from scipy.signal import convolve
 from scipy.stats import norm, truncnorm
-from collections import defaultdict, OrderedDict
-from pybads import BADS
+from collections import OrderedDict
 
-
-
-
-def main():
-    #data = data_cleanup("lucio", (20220512, 20230605))
-
-    nreps = 200
-    #data, sim_params = generate_fake_data(nreps=nreps, method='simulate', return_wager=True)
-    #with open(f"simdata_202308_{nreps}reps.pkl", "wb") as file:
-    #    pickle.dump((data, sim_params), file, protocol=-1)
-
-    with open(f"../results/simdata_202308_{nreps}reps.pkl", "rb") as file:
-         data, sim_params = pickle.load(file)
-
-    # init_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
-    #                'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
-    init_params = OrderedDict([
-        ('kmult', 15),
-        ('bound', np.array([1, 1])),
-        ('alpha', 0.05),
-        ('theta', [0.8, 0.6, 0.7]),
-        ('ndt', [0.1, 0.3, 0.2]),
-        ('sigma_ndt', 0.06),
-    ])
-    param_keys = list(init_params.keys())
-    #param_keys = ['kmult', 'bound', 'alpha', 'theta', 'ndt', 'sigma_ndt']
-
-    accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
-
-    # provide init_params to target, so that we can hold some fixed, if desired
-    target = lambda params: ddm_2d_objective(params, init_params, fixed, param_keys, data, accum)
-
-    init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
-    lb  = init_params_array * 0.5
-    ub  = init_params_array * 2
-    plb = init_params_array * 0.75
-    pub = init_params_array * 1.5
-
-    fixed = np.ones_like(init_params_array)
-    # fixed[0] = 0
-
-    bads = BADS(target, init_params_array, lb, ub, plb, pub)
-    optimize_result = bads.optimize()
-
-
-def generate_fake_data(sim_params=None, nreps=100, tmax=2, method='simulate', return_wager=False):
-
-    if sim_params is None:
-        sim_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
-                      'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
-
-    mods = np.array([1, 2, 3])
-    mods = np.array([1])
-    cohs = np.array([1, 2])
-    hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
-
-    deltas = np.array([-3, 0, 3])
-
-    trial_table, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
-
-    accum = dtb.AccumulatorModelMOI(tvec=np.arange(0, tmax, 0.005), grid_vec=np.arange(-3, 0, 0.025))
-    model_data_sim, _ = ddm_2d_generate_data(sim_params, data=trial_table, accumulator=accum, method=method, return_wager=return_wager)
-
-    return model_data_sim, sim_params
+from ddm_moi.Accumulator import AccumulatorModelMOI
 
 
 def optim_decorator(loss_func):
-    def wrapper(params, init_params: OrderedDict, fixed: np.ndarray, param_keys: list, *args, **kwargs):
 
-        # params and init_params should be ordered dicts, extract array format
-        # to replace params with init_params where fixed is true
+    def wrapper(params: np.ndarray, init_params: OrderedDict, fixed: np.ndarray = None, *args, **kwargs):
+   
+        # params has to already be an array, because it is the first argument in the optimization function
+        # init_params should be ordered dicts, so here I extract array format
+        # to replace params with init_params where fixed index is true
+
+        if fixed is None:
+            fixed = np.zeros_like(params)
+
+        if 'PDW' in kwargs['outputs']:
+            param_keys = ['kmult', 'bound', 'alpha', 'theta', 'ndt', 'sigma_ndt']
+        else:
+            param_keys = ['kmult', 'bound', 'ndt', 'sigma_ndt']
+
         init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
         params_array = set_params_list(params, init_params_array, fixed)
 
-        # convert back to dict for passing to loss function
+        # convert back to OrderedDict for passing to loss function
         params_dict = OrderedDict()
         current_index = 0
         for key, value in init_params.items():
@@ -100,17 +43,41 @@ def optim_decorator(loss_func):
                 params_dict[key] = params_array[current_index]
             current_index += value_length
 
+
+        #print(params_dict)
+
+        ii = 0
+        for key, val in params_dict.items():
+            #if not fixed[ii]:
+            print(f"{key}: {val}\t")
+            ii +=1
+
         start_time = time.time()
-        loss_val, _, _ = loss_func(params_dict, *args, **kwargs)
+        loss_val, llhs, model_data = loss_func(params_dict, *args, **kwargs)
         end_time = time.time()
 
-        print(f"Likelihood evaluation time: {end_time - start_time:.2f}s")
-        return loss_val
+        print(f"Total loss:{loss_val:.2f}, time taken: {end_time - start_time:.2f}s")
+        print({key : round(llhs[key], 2) for key in llhs})
+        print('\n\n')
+
+        if loss_val == np.inf:
+            print(params_dict)
+            raise ValueError("loss function evaluated to infinite")
+
+
+        # if all parameters are fixed, we're not trying to fit, we just want the model predictions
+        if (fixed==1).all():
+            return loss_val, llhs, model_data
+        else:
+            return loss_val
 
     return wrapper
 
 
-def set_params_list(params, x0, fixed: np.ndarray = None):
+def set_params_list(params: np.ndarray, x0: np.ndarray, fixed: np.ndarray = None) -> np.ndarray:
+    """
+    set the parameter list using current iteration, but replace true indices in fixed with initial values
+    """
 
     if x0 is not None and (fixed is not None and fixed.sum() > 0):
         assert x0.shape == params.shape == fixed.shape, "x0 and fixed must match x in shape"
@@ -121,10 +88,10 @@ def set_params_list(params, x0, fixed: np.ndarray = None):
     return params
 
 
-def get_params_array_from_dict(params, param_keys=None):
+def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndarray:
 
     if param_keys is not None:
-        params = {key: params[key] for key in param_keys}
+        params = OrderedDict([(key, params[key]) for key in param_keys])
 
     values_list = []
     for value in params.values():
@@ -132,69 +99,68 @@ def get_params_array_from_dict(params, param_keys=None):
             values_list.extend(value)
         else:
             values_list.append(value)
+
     return np.array(values_list)
 
-def set_params_dict_from_array():
-    ...
 
 @optim_decorator
 def ddm_2d_objective(params: dict, data: pd.DataFrame,
-                     accumulator: dtb.AccumulatorModelMOI = dtb.AccumulatorModelMOI(),
-                     outputs=None):
+                     accumulator: AccumulatorModelMOI,
+                     outputs=None, llh_scaling=None):
 
     if outputs is None:
         outputs = ['choice', 'PDW', 'RT']
+        llh_scaling = [1, 1, 1]
 
     # only calculate pdfs if fitting confidence variable
     return_pdf = 'PDW' in outputs
 
     # get model predictions (probabilistic) given parameters and trial conditions in data
-    model_data, _ = ddm_2d_generate_data(params=params,
-                                      data=data,
-                                      accumulator=accumulator,
-                                      method='probability',
-                                      return_wager=return_pdf)
+    model_data, _ = ddm_2d_generate_data(params=params, data=data, accumulator=accumulator, method='prob', return_wager=return_pdf)
 
-    # calculate log likelihoods of parameters given observed data
+    # calculate log likelihoods of parameters, given observed data
 
     model_llh = dict()
+
+    # choice and PDW likelihoods according to bernoulli probability
     model_llh['choice'] = np.sum(np.log(model_data.loc[data['choice'] == 1, 'choice'])) + \
-                          np.sum(np.log(1 - model_data.loc[data['choice'] == 0, 'choice']))
+                           np.sum(np.log((1 - model_data.loc[data['choice'] == 0, 'choice'])))
     if return_pdf:
         model_llh['PDW'] = np.sum(np.log(model_data.loc[data['PDW'] == 1, 'PDW'])) + \
-                             np.sum(np.log(1 - model_data.loc[data['PDW'] == 0, 'PDW']))
+                            np.sum(np.log(1 - model_data.loc[data['PDW'] == 0, 'PDW']))
 
     # RT likelihood straight from dataframe
     model_llh['RT'] = np.log(model_data['RT']).sum()
-    model_llh['RT'] /= 10  # seems to be a factor of 10 (roughly) larger than the other two.
 
-    neg_llh = -np.sum(np.array([model_llh[v] for v in outputs if v in model_llh]))
+    # sum the individual log likelihoods, if included in outputs, and after scaling them according to llh_scaling
+    neg_llh = -np.sum(np.array([model_llh[v]*w for v, w in zip(outputs, llh_scaling) if v in model_llh]))
 
     return neg_llh, model_llh, model_data
 
 
-def ddm_2d_generate_data(params, data: pd.DataFrame(),
-                         accumulator: dtb.AccumulatorModelMOI = dtb.AccumulatorModelMOI(),
-                         method: str = 'simulate',
-                         return_wager: bool = True,
-                         save_dv: bool = False,
-                         ):
+def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
+                         accumulator: AccumulatorModelMOI = AccumulatorModelMOI(),
+                         method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
+                         return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Given an accumulator model and trial conditions, this function generates model outputs for behavioral variables.
     Setting method = 'simulate' will simulate decision variables on individual trials
     method = 'probability' will return the probabilities of rightward choice and high bet on each trial, and
        (assume there is already a dataset with actual observed choices, RTs, and wagers)
-    :param params:
-    :param data:
+    :param params: parameters dictionary
+    :param data: dataframe, containing modality, coherence, heading, delta
     :param accumulator:
-    :param method: 'simulate', 'sample', or 'probability'
+    :param method: 'sim[ulate]', 'samp[le]', or 'prob[ability]'
     :param return_wager: True or False
-    :param save_dv: True or False
+    :param save_dv: True or False, only relevant if method == 'simulate'
     :return:
     """
 
+    # TODO add RT_method ' to return likelihood, or mean RT, or max of distribution'
+    # TODO urgency and ves/vis scaling
     # TODO add wager_method options: 'log_odds', 'time', 'evidence'
     # TODO add cue weighting options: 'optimal', 'random', 'fixed'
+    # TODO unit tests
 
     mods = np.unique(data['modality'])
     cohs = np.unique(data['coherence'])
@@ -202,14 +168,12 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
     deltas = np.unique(data['delta'])
 
     model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
+    model_data[['choice', 'PDW', 'RT']] = np.nan
 
-    target_cols = ['choice', 'PDW', 'RT']
-    model_data[target_cols] = np.nan
-
-    # TODO this is a placeholder, eventually should be acc, vel (+ additional urgency maybe)
+    # this is a placeholder, eventually should be acc, vel
     urg_ves, urg_vis = 1, 1
 
-    kvis = params['kmult'] * cohs.T
+    kvis = params['kmult'] * cohs.T * 100  # scale the parameter up
     kves = np.mean(kvis)  # for now, this means vis and ves do end up with the same log odds map
     accumulator.bound = params['bound']
 
@@ -233,7 +197,7 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
 
             # run the method of images dtb to extract pdfs, cdfs, and LPO
             accumulator.set_drifts(list(abs_drifts), hdgs[hdgs >= 0])
-            accumulator.dist(return_pdf=return_wager).log_posterior_odds()
+            accumulator.dist(return_pdf=True).log_posterior_odds()
             log_odds_maps.append(accumulator.log_odds)
 
             # TODO this is where we would enforce different confidence mappings - simply by reassigning log_odds_maps / log_odds_above_threshold
@@ -242,7 +206,7 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
 
         log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
 
-    dt = np.diff(accumulator.tvec[:2])
+    print('generating model results')
     # now to generate model results, loop over all conditions
     for m, mod in enumerate(mods):
         for c, coh in enumerate(cohs):
@@ -251,19 +215,21 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
                 if (delta != 0 and mod < 3) or (c > 0 and mod == 1):
                     continue
 
-                if mod == 1:
-                    drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))\
+                print(mod, coh, delta)
 
-                    if method == 'simulate':
-                        drifts *= dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(dt)
+                if mod == 1:
+                    drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))
+
+                    if method == 'simulate' or method == 'sim':
+                        drifts *= accumulator.dt
+                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
                 if mod == 2:
                     drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs))
 
-                    if method == 'simulate':
-                        drifts *= dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(dt)
+                    if method == 'simulate' or method == 'sim':
+                        drifts *= accumulator.dt
+                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
                 elif mod == 3:
                     w_ves = np.sqrt(kves ** 2 / (kves ** 2 + kvis[c] ** 2))
@@ -273,21 +239,19 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
                     drift_ves = urg_ves * kves * np.sin(np.deg2rad(hdgs - delta / 2))
                     drift_vis = urg_ves * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
-                    if method == 'simulate':
-                        drift_ves, drift_vis = drift_ves * dt, drift_vis * dt
+                    if method == 'simulate' or method == 'sim':
+                        drift_ves, drift_vis = drift_ves * accumulator.dt, drift_vis * accumulator.dt
                         sigma_dv = np.sqrt(w_ves ** 2 * params['sigma_dv'] ** 2 + w_vis ** 2 * params['sigma_dv'] ** 2)
-                        sigma_dv = sigma_dv * np.sqrt(np.diff(accumulator.tvec[:2]))
+                        sigma_dv = sigma_dv * np.sqrt(accumulator.dt)
 
                     drifts = w_ves * drift_ves + w_vis * drift_vis
 
-                if method == 'simulate':
+                if method == 'simulate' or method == 'sim':
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
                 # calculate cdf and pdfs using signed drift rates now
-
                 accumulator.set_drifts(list(drifts), hdgs)
                 accumulator.dist(return_pdf=return_wager)
-                print(mod, coh, delta)
 
                 for h, hdg in enumerate(hdgs):
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
@@ -296,7 +260,7 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
                     if trial_index.sum() == 0:
                         continue
 
-                    if method == 'simulate':
+                    if method == 'simulate' or method == 'sim':
                         these_trials = np.where(trial_index)[0]
 
                         non_dec_time = truncnorm.rvs(-2, 2, loc=params['ndt'][m], scale=params['sigma_ndt'],
@@ -351,6 +315,12 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
                         # then either return those directly as probabilities, or sample from them to generate 'trials'
 
                         p_right = accumulator.p_corr[h].item()
+
+                        if p_right <= 0:
+                            p_right = 1e-10
+                        elif p_right >= 1:
+                            p_right -= 1e-10
+
                         p_choice = np.array([p_right, 1 - p_right])
 
                         # ====== WAGER ======
@@ -373,14 +343,14 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
                             p_choice_given_wager, p_wager = _margconds_from_intersection(p_choice_and_wager, p_choice)
                             p_wager += np.array([-params['alpha'], params['alpha']]) * p_wager[0]
 
-                            if method == 'sample':
+                            if method == 'sample' or method == 'samp':
                                 model_data.loc[trial_index, 'PDW'] = \
                                     np.random.choice([1, 0], trial_index.sum(), replace=True, p=p_wager)
                             else:
                                 model_data.loc[trial_index, 'PDW'] = p_wager[0]
 
                         # ====== CHOICE ======
-                        if method == 'sample':
+                        if method == 'sample' or method == 'samp':
                             model_data.loc[trial_index, 'choice'] = \
                                 np.random.choice([1, 0], trial_index.sum(), replace=True, p=p_choice)
                         else:
@@ -399,21 +369,28 @@ def ddm_2d_generate_data(params, data: pd.DataFrame(),
                         #   sample from distribution (generating fake RTs) if method == 'sample'
                         #   or store probability of observed RTs, if method == 'probability'
 
-                        if method == 'sample':
+                        if method == 'sample' or method == 'samp':
                             model_data.loc[trial_index, 'RT'] = \
                                 np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
                         else:
-                            actual_rts = data.loc[trial_index, 'RT'].values
-                            dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
-                            model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
+                            if rt_method == 'likelihood':
+                                actual_rts = data.loc[trial_index, 'RT'].values
+                                dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
+                                model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
+                            else:
+                                # check that data doesn't contain RT column
+                                if rt_method == 'mean':
+                                    model_data.loc[trial_index, 'RT'] = (accumulator.tvec * rt_dist).sum() # expected value
+                                elif rt_method == 'max':
+                                    model_data.loc[trial_index, 'RT'] = accumulator.tvec[np.argmax(rt_dist)]
 
     # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
-    if method == 'probability':
-        model_data.loc[:, ['choice', 'PDW']].replace(to_replace=0, value=np.finfo(np.float64).tiny, inplace=True)
-        model_data.loc[:, ['choice', 'PDW']].replace(to_replace=1, value=1 - np.finfo(np.float64).tiny, inplace=True)
+    if method == 'probability' or method == 'prob':
+
+        model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=0, value=1e-10)
+        model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=1, value=1 - 1e-10)
 
     return model_data, log_odds_maps
-
 
 
 def _margconds_from_intersection(prob_ab, prob_a):
@@ -432,7 +409,11 @@ def _margconds_from_intersection(prob_ab, prob_a):
     b_given_a = (prob_ab / np.sum(prob_ab)) / prob_a
 
     prob_b = prob_a.T @ b_given_a
-    a_given_b = b_given_a * prob_a / prob_b
+
+    if np.any(prob_b == 0):
+        a_given_b = b_given_a * prob_a
+    else:
+        a_given_b = b_given_a * prob_a / prob_b
 
     return a_given_b, prob_b.flatten()
 
@@ -454,8 +435,3 @@ def _intersection_from_margconds(a_given_b, prob_a, prob_b):
 
     return prob_ab, b_given_a
 
-
-
-
-if __name__ == '__main__':
-    main()

@@ -22,13 +22,10 @@ def prop_se_minmax(x):
     return (np.mean(x)-se, np.mean(x)+se)
 
 
-# %% behavior dataframe operations
-
-def drop_brfix(df, columns="choice"):
+def drop_brfix(df, columns="choice") -> pd.DataFrame:
     return df.dropna(subset=columns, axis=0)
 
-
-def drop_one_targs(df, columns=["oneTargChoice"]):
+def drop_one_targs(df, columns=["oneTargChoice"]) -> pd.DataFrame:
     return df.loc[(df[columns] == 0).all(axis=1), :]
 
 
@@ -44,19 +41,19 @@ def drop_outlierRTs(df, rt_range, metric: str = "precomputed") -> pd.DataFrame:
     min_rt, max_rt = 0, np.inf
 
     if metric == "precomputed":
-        minRT, maxRT = rt_range
+        min_rt, max_rt = rt_range
 
     elif metric == "stdev":
         rt_std = df['RT'].std()
         rt_mu = df['RT'].mean()
-        minRT = np.max(rt_mu - rt_range*rt_std, 0)
-        maxRT = rt_mu + rt_range*rt_std
+        min_rt = np.max(rt_mu - rt_range*rt_std, 0)
+        max_rt = rt_mu + rt_range*rt_std
 
     elif metric == "percentile":
-        prcRT = np.percentile(df['RT'], rt_range)
-        minRT, maxRT = prcRT[0], prcRT[1]
+        prc_rt = np.percentile(df['RT'], rt_range)
+        min_rt, max_rt = prc_rt[0], prc_rt[1]
 
-    return df.loc[(df['RT'] > minRT) & (df['RT'] <= maxRT), :]
+    return df.loc[(df['RT'] > min_rt) & (df['RT'] <= max_rt), :]
 
 
 def bin_conditions(df, bin_ranges, bin_labels) -> pd.DataFrame:
@@ -124,3 +121,57 @@ def data_cleanup(filename: str, drop_cols=None, save_file: bool = False) -> pd.D
         bhv_df_clean.to_csv(PurePath(folder, clean_filename))
     
     return bhv_df_clean
+
+
+def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
+                               nreps: int = 1, shuff: bool = True) -> tuple[pd.DataFrame, int]:
+
+    # if shuff:
+    #     np.random.seed(42)  # for reproducibility
+
+    num_hdg_groups = any([1 in mods]) + any([2 in mods]) * len(cohs) + \
+        any([3 in mods]) * len(cohs) * len(deltas)
+    hdg = np.tile(hdgs, num_hdg_groups)
+
+    coh = np.empty_like(hdg)
+    modality = np.empty_like(hdg)
+    delta = np.empty_like(hdg)
+
+    if 1 in mods:
+        coh[:len(hdgs)] = cohs[0]
+        delta[:len(hdgs)] = 0
+        modality[:len(hdgs)] = 1
+        last = len(hdgs)
+    else:
+        last = 0
+
+    # visual has to loop over cohs
+    if 2 in mods:
+        for c in range(len(cohs)):
+            these = slice(last + c*len(hdgs), last + c*len(hdgs) + len(hdgs))
+            coh[these] = cohs[c]
+            delta[these] = 0
+            modality[these] = 2
+        last = these.stop
+
+    # combined has to loop over cohs and deltas
+    if 3 in mods:
+        for c in range(len(cohs)):
+            for d in range(len(deltas)):
+                here = last + c*len(hdgs)*len(deltas) + d*len(hdgs)
+                these = slice(here, here + len(hdgs))
+                coh[these] = cohs[c]
+                delta[these] = deltas[d]
+                modality[these] = 3
+
+    # Now replicate times nreps and shuffle (or not):
+    condlist = np.column_stack((modality, coh, hdg, delta))
+    trial_table = np.tile(condlist, (nreps, 1))
+    ntrials = len(trial_table)
+
+    if shuff:
+        trial_table = trial_table[np.random.permutation(ntrials)]
+
+    trial_table = pd.DataFrame(trial_table, columns=['modality', 'coherence', 'heading', 'delta'])
+
+    return trial_table, ntrials
