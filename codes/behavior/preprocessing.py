@@ -123,6 +123,21 @@ def data_cleanup(filename: str, drop_cols=None, save_file: bool = False) -> pd.D
     return bhv_df_clean
 
 
+def format_onetargconf(df: pd.DataFrame, remove_one_targ: bool = True) -> pd.DataFrame:
+
+    if remove_one_targ:
+        # create new df with one-target PDW trials removed
+        return df.loc[df['oneTargConf'] == 0]
+
+    else:
+        # create a single category type column for PDW, with oneTarg trials coded as "2"
+        df["PDW_1targ"] = df['PDW']
+        df.loc[df['oneTargConf'] == 1, 'PDW_1targ'] = 2
+        df["PDW_1targ"] = df['PDW_1targ'].astype("category")
+
+    return df
+
+
 def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
                                nreps: int = 1, shuff: bool = True) -> tuple[pd.DataFrame, int]:
 

@@ -173,36 +173,36 @@ def plot_behavior_hdg(data_obs: dict, data_fit: dict = None, col='coherence', hu
 
         for yi, (y_var, df_obs) in enumerate(data_obs.items()):
             
-        ln_stl = '' if y_var in data_fit else '-'  # draw lines between points if fit data is not provided
-        yerr_type = 'cont_se' if y_var == 'RT' else 'prop_se'
-        ylims = [0.5, 1.2] if y_var == 'RT' else [0, 1] 
+            ln_stl = '' if y_var in data_fit else '-'  # draw lines between points if fit data is not provided
+            yerr_type = 'cont_se' if y_var == 'RT' else 'prop_se'
+            ylims = [0.5, 1.2] if y_var == 'RT' else [0, 1] 
 
-        for ic, c in enumerate(cols):
-            for ih, h in enumerate(hues):
-                hcol = hue_colors[ih]
+            for ic, c in enumerate(cols):
+                for ih, h in enumerate(hues):
+                    hcol = hue_colors[ih]
 
-                inds = (df_obs[col] == c) & (df_obs[hue] == h)
+                    inds = (df_obs[col] == c) & (df_obs[hue] == h)
 
-                if np.sum(inds):
-                    temp_df = df_obs.loc[inds, :]
+                    if np.sum(inds):
+                        temp_df = df_obs.loc[inds, :]
 
-                    axs[yi][ic].errorbar('heading', y='mean', yerr=yerr_type, data=temp_df,
-                                          marker='.', ms=5, mfc=hcol, mec=hcol, linestyle=ln_stl)
+                        axs[yi][ic].errorbar('heading', y='mean', yerr=yerr_type, data=temp_df,
+                                            marker='.', ms=5, mfc=hcol, mec=hcol, linestyle=ln_stl)
 
-                    if data_fit is not None and y_var in data_fit:
-                        df_fit = data_fit[y_var]
-                        df_fit = df_fit.loc[(df_fit[col] == c) & (df_fit[hue] == h)]
-                        axs[yi][ic].plot(df_fit['hdgs'], df_fit['yhat'], color=hcol)
+                        if data_fit is not None and y_var in data_fit:
+                            df_fit = data_fit[y_var]
+                            df_fit = df_fit.loc[(df_fit[col] == c) & (df_fit[hue] == h)]
+                            axs[yi][ic].plot(df_fit['hdgs'], df_fit['yhat'], color=hcol)
 
-            # TODO more cosmetic stuff
-            axs[yi][ic].set_xticks(hdgs)
-            axs[yi][ic].set_ylim(ylims)
-            axs[yi][ic].set_ylabel(labels[yi])
+                # TODO more cosmetic stuff
+                axs[yi][ic].set_xticks(hdgs)
+                axs[yi][ic].set_ylim(ylims)
+                axs[yi][ic].set_ylabel(labels[yi])
 
-            # seaborn alternative
-            # axs[0][c] = sns.lineplot(x='heading', y='mean', hue=hue, errorbar=None,
-            #               data=df_obs.loc[df_obs['coherence']==coh], palette=hue_colors,
-            #               ax=axs[yi][c])
+                # seaborn alternative
+                # axs[0][c] = sns.lineplot(x='heading', y='mean', hue=hue, errorbar=None,
+                #               data=df_obs.loc[df_obs['coherence']==coh], palette=hue_colors,
+                #               ax=axs[yi][c])
 
     plt.show()
 
