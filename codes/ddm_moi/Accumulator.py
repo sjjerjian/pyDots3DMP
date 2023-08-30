@@ -163,7 +163,7 @@ class AccumulatorModelMOI:
 
 # ============
 # functions
-# could make these private methods...
+# could make these private methods?
 
 def sj_rot(j, s0, k):
     """
@@ -407,16 +407,3 @@ def log_pmap(pdf, q=30):
     """
     pdf[pdf < 10**(-q)] = 10**(-q)
     return (np.log10(pdf)+q) / q
-
-
-
-
-
-def main():
-
-    accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
-    accum.dist(return_pdf=True).log_posterior_odds().plot()
-
-
-if __name__ == '__main__':
-    main()
