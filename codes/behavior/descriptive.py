@@ -62,26 +62,11 @@ def logit_fit_choice_hdg(df, num_hdgs: int = 200) -> pd.Series:
     return pd.Series({'yhat': yhat, 'params': params})
 
 
-def gauss_fit_decorator(y_vars=('choice', 'PDW', 'RT')):
-    def decorator(gauss_fit_function):
-        @wraps(gauss_fit_function)
-        def wrapper(df, p0: np.ndarray, y_var=y_vars, numhdgs=200, by_conds='modality'):
-            fit_results = {
-                y_var: df.groupby(by=by_conds).apply(gauss_fit_function, p0_single, y_var, numhdgs).dropna(axis=0).reset_index()
-                for y_var, p0_single in zip(y_vars, p0)
-            }
-            
-            # explode hdgs and yhat vectors
-            fit_results = {k: df.drop('params', axis=1).explode(['hdgs', 'yhat']) for k, df in fit_results.items()}
-            
-            return fit_results
-        return wrapper
-    return decorator
-
-
-#@gauss_fit_decorator
 def gauss_fit_hdg(df, p0: np.ndarray, y_var: str = 'choice', numhdgs: int = 200) -> pd.Series:
-
+    
+    """
+    gaussian fitting over headings to single set of data
+    """
     hdgs = np.unique(df['heading']).reshape(-1, 1)
     xhdgs = np.linspace(np.min(hdgs), np.max(hdgs), numhdgs).reshape(-1, 1)
 
@@ -106,12 +91,13 @@ def gauss_fit_hdg(df, p0: np.ndarray, y_var: str = 'choice', numhdgs: int = 200)
     # # To compute 1SD error on parameters,
     # perr = np.sqrt(np.diag(pcov))
 
-    return pd.Series({'yhat': yhat, 'hdgs': xhdgs.flatten(), 'params': params})
+    return pd.Series({'hdgs': xhdgs.flatten(), 'yhat': yhat, 'params': params})
 
 
-# TODO probably drop this, same as decorator
 def gauss_fit_hdg_group(df, p0, y_vars: tuple = ('choice', 'PDW', 'RT'), by_conds = 'modality', numhdgs: int = 200) -> dict:
-
+    """
+    apply the gaussian
+    """
     fit_results = {
         y_var: df.groupby(by=by_conds).apply(gauss_fit_hdg, p, y_var, numhdgs).dropna(axis=0).reset_index()
         for y_var, p in zip(y_vars, p0)
@@ -121,6 +107,22 @@ def gauss_fit_hdg_group(df, p0, y_vars: tuple = ('choice', 'PDW', 'RT'), by_cond
     fit_results = {k: df.drop('params', axis=1).explode(['hdgs', 'yhat']) for k, df in fit_results.items()}
 
     return fit_results
+
+
+def fit_results_to_dataframe(fit_results, by_conds = 'modality'):
+
+    y_vars = list(fit_results.keys())
+
+    by_conds.append('hdgs')
+    fit_df = fit_results[y_vars[0]][by_conds].rename(columns={'hdgs': 'heading'})
+
+    for label, df in fit_results.items():
+        fit_df[label] = df['yhat']
+
+    return fit_df
+
+
+
 
 
 # %%
@@ -138,28 +140,39 @@ def cue_weighting(fit_results):
 # %%
 
 
-def plot_behavior_hdg(data_obs: dict, data_fit: dict = None, col='coherence', hue='modality', hue_colors='krb', figsize: tuple=(5, 7), labels: list = None):
+def plot_behavior_hdg(data_obs: dict, data_fit: dict = None, col='coherence', hue='modality', hue_colors='krb', figsize: tuple=(5, 7), y_vars: list = None, labels: list = None):
 
     # TODO test that this is flexible enough to plot with different configs e.g. hue = delta, or with hue = coherence and col as delta
     # TODO add in pCorrect
     # TODO plan out more general/alternative version which can handle results from model fitting, maybe reconfigure data_obs and data_fit just to be df
     #    (create a decorator which converts data_obs and data_fit from the list of dicts to single dataframe (since the trial conditions should be the same))
 
+    if y_vars is None:
+        y_vars = ['choice', 'PDW', 'RT']
+
     if labels is None:
         labels = ['pRight', 'pHigh', 'mean RT (s)']
-
-
-    # data_obs should be the output of behavior_means
-    # data_fit should be the output of bhv_gauss_fits, or model
-    # and should be a dictionary contain choice, PDW, and RT keys
-    hdgs = np.unique(data_obs['choice']['heading'])
-    hues = np.unique(data_obs['choice'][hue])
-    cols = np.unique(data_obs['choice'][col])
-
-    fig, axs = plt.subplots(nrows=len(data_obs), ncols=len(cols), figsize=figsize)
-
-    for yi, (y_var, df_obs) in enumerate(data_obs.items()):
         
+    if isinstance(data_obs, pd.DataFrame) and isinstance(data_fit, pd.DataFrame):
+
+        #g = sns.FacetGrid(data=)
+        # use map here!
+        hdgs = np.unique(data_obs['heading'])
+        hues = np.unique(data_obs[hue])
+        cols = np.unique(data_obs[col])
+
+        
+
+    elif isinstance(data_obs, dict) and isinstance(data_fit, dict):
+
+        hdgs = np.unique(data_obs['choice']['heading'])
+        hues = np.unique(data_obs['choice'][hue])
+        cols = np.unique(data_obs['choice'][col])
+
+        fig, axs = plt.subplots(nrows=len(y_vars), ncols=len(cols), figsize=figsize)
+
+        for yi, (y_var, df_obs) in enumerate(data_obs.items()):
+            
         ln_stl = '' if y_var in data_fit else '-'  # draw lines between points if fit data is not provided
         yerr_type = 'cont_se' if y_var == 'RT' else 'prop_se'
         ylims = [0.5, 1.2] if y_var == 'RT' else [0, 1] 
