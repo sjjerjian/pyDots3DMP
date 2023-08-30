@@ -10,7 +10,9 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from scipy.optimize import curve_fit
 
-from codes.behavior.bhv_preprocessing import *
+from functools import wraps
+from behavior.preprocessing import prop_se, cont_se, gaus
+
 
 # TODO functions list
 # 1. extracting behavior from neural recording dataset
@@ -20,61 +22,65 @@ from codes.behavior.bhv_preprocessing import *
 # 5. regression analyses
 
 
-def behavior_means(df, conftask=2, by_conds=None):
+def behavior_means(df, by_conds='heading'):
 
-    # if conftask == 1:
-    #    df['PDW'] = df['conftask'] > 0.5
+    # p_right = _groupbyconds(df, by_conds, 'choice', prop_se)
+    # p_high = _groupbyconds(df, by_conds, 'PDW', prop_se)
+    # mean_rt = _groupbyconds(df, by_conds, 'RT', cont_se)
+    # correct = _groupbyconds(df, by_conds, 'correct', prop_se)
+    # return {'choice': p_right, 'PDW': p_high, 'RT': mean_rt, 'correct': p_correct}
 
-    # for confidence means, remove one-target confidence trials
-    df_noOneTarg = df.loc[df['oneTargConf'] == 0]
+    agg_funcs = {
+        'choice': ['count', 'mean', prop_se],
+        'PDW': ['mean', prop_se],
+        'RT': ['mean', cont_se],
+        'correct': ['mean', prop_se],
+    }
+    agg_funcs = {k:v for k,v in agg_funcs.items() if k in df.columns}
 
-
-    # pRight
-    pRight = df.groupby(by=by_conds)['choice'].agg(
-        [np.mean, prop_se]).dropna(axis=0).reset_index()
-
-    # this achieves the same thing
-    # pRight = pd.pivot_table(df, values='choice',
-    #       index=['modality','coherence'], columns='heading',
-    #       aggfunc=(np.mean,prop_se)).stack().reset_index()
-
-    # repeat for pHigh
-    pHigh = None
-    if conftask == 1:
-        pHigh = df_noOneTarg.groupby(by=by_conds)['conf'].agg(
-            [np.mean, cont_se]).dropna(axis=0).reset_index()
-    elif conftask == 2:
-        pHigh = df_noOneTarg.groupby(by=by_conds)['PDW'].agg(
-            [np.mean, prop_se]).dropna(axis=0).reset_index()
+    return df.groupby(by=by_conds)[list(agg_funcs.keys())].agg(agg_funcs).dropna(axis=0).reset_index()
 
 
-    # meanRT calculation - use continuous error func
-    meanRT = df.groupby(by=by_conds)['RT'].agg(
-        [np.mean, cont_se]).dropna(axis=0).reset_index()
-
-    return pRight, pHigh, meanRT
+# def _groupbyconds(df, by_conds, data_col, errfcn):
+#     return df.groupby(by=by_conds)[data_col].agg([np.mean, errfcn]).dropna(axis=0).reset_index()
 
 
-def choice_logit_fit(df, num_hdgs: int = 200) -> pd.Series:
+def logit_fit_choice_hdg(df, num_hdgs: int = 200) -> pd.Series:
 
     hdgs = np.unique(df['heading']).reshape(-1, 1)
     xhdgs = np.linspace(np.min(hdgs), np.max(hdgs), num_hdgs).reshape(-1, 1)
 
-    # logreg = smf.logit("choice ~ heading", data=bhv_df).fit()
+    # logreg = smf.logit("choice ~ heading", data=df).fit()  # using formula api
     logreg = sm.Logit(df['choice'], sm.add_constant(df['heading'])).fit()
     yhat = logreg.predict(sm.add_constant(xhdgs))
     params = logreg.params['heading'], logreg.params['const']
 
-    # alternatively, using sklearn
-    # logreg = LogisticRegression().fit(
-    #               df['heading'].to_numpy().reshape(-1, 1),
-    #               df['choice'].to_numpy())
+    # alternatively, using sklearn # TODO test
+    # logreg = LogisticRegression().fit(df[['heading]], df['choice'])
     # yhat = logreg.predict_proba(xhdgs)[:, 1]
 
     return pd.Series({'yhat': yhat, 'params': params})
 
 
-def gauss_fit(df, p0: np.ndarray, y_var: str = 'choice', numhdgs: int = 200) -> pd.Series:
+def gauss_fit_decorator(y_vars=('choice', 'PDW', 'RT')):
+    def decorator(gauss_fit_function):
+        @wraps(gauss_fit_function)
+        def wrapper(df, p0: np.ndarray, y_var=y_vars, numhdgs=200, by_conds='modality'):
+            fit_results = {
+                y_var: df.groupby(by=by_conds).apply(gauss_fit_function, p0_single, y_var, numhdgs).dropna(axis=0).reset_index()
+                for y_var, p0_single in zip(y_vars, p0)
+            }
+            
+            # explode hdgs and yhat vectors
+            fit_results = {k: df.drop('params', axis=1).explode(['hdgs', 'yhat']) for k, df in fit_results.items()}
+            
+            return fit_results
+        return wrapper
+    return decorator
+
+
+#@gauss_fit_decorator
+def gauss_fit_hdg(df, p0: np.ndarray, y_var: str = 'choice', numhdgs: int = 200) -> pd.Series:
 
     hdgs = np.unique(df['heading']).reshape(-1, 1)
     xhdgs = np.linspace(np.min(hdgs), np.max(hdgs), numhdgs).reshape(-1, 1)
@@ -103,13 +109,11 @@ def gauss_fit(df, p0: np.ndarray, y_var: str = 'choice', numhdgs: int = 200) -> 
     return pd.Series({'yhat': yhat, 'hdgs': xhdgs.flatten(), 'params': params})
 
 
-def bhv_gauss_fits(bhv_df, p0, y_vars=('choice','PDW','RT'),
-                   by_conds: str = 'modality', numhdgs: int = 200) -> dict:
-
-    grp_bhv_df = bhv_df.groupby(by=by_conds)
+# TODO probably drop this, same as decorator
+def gauss_fit_hdg_group(df, p0, y_vars: tuple = ('choice', 'PDW', 'RT'), by_conds = 'modality', numhdgs: int = 200) -> dict:
 
     fit_results = {
-        y_var: grp_bhv_df.apply(gauss_fit, p, y_var, numhdgs).dropna(axis=0).reset_index()
+        y_var: df.groupby(by=by_conds).apply(gauss_fit_hdg, p, y_var, numhdgs).dropna(axis=0).reset_index()
         for y_var, p in zip(y_vars, p0)
     }
 
@@ -129,33 +133,36 @@ def cue_weighting(fit_results):
     for res in fit_results.keys():
         ...
         # TODO calculate wves pred and wves emp for each of pRight, PDW, RT
-        # TODO first fix the behavior_fit function to do by_delta as well...
     return wves_emp, wves_pred
 
 # %%
 
 
-def plot_behavior_means(data_obs, data_fit=None, col='coherence', hue='modality', hue_colors='krb',
-                        labels: list = None):
+def plot_behavior_hdg(data_obs: dict, data_fit: dict = None, col='coherence', hue='modality', hue_colors='krb', figsize: tuple=(5, 7), labels: list = None):
 
-    # TODO test that this is flexible enough to plot with hue = delta, or with hue = coherence and col as delta
+    # TODO test that this is flexible enough to plot with different configs e.g. hue = delta, or with hue = coherence and col as delta
     # TODO add in pCorrect
-    # TODO plan out more general/alternative version which can handle results from model fitting
-    # data fit should be optional (i.e. if not provided, just draw the lines between the observed data points
+    # TODO plan out more general/alternative version which can handle results from model fitting, maybe reconfigure data_obs and data_fit just to be df
+    #    (create a decorator which converts data_obs and data_fit from the list of dicts to single dataframe (since the trial conditions should be the same))
 
     if labels is None:
         labels = ['pRight', 'pHigh', 'mean RT (s)']
 
+
+    # data_obs should be the output of behavior_means
+    # data_fit should be the output of bhv_gauss_fits, or model
+    # and should be a dictionary contain choice, PDW, and RT keys
     hdgs = np.unique(data_obs['choice']['heading'])
     hues = np.unique(data_obs['choice'][hue])
     cols = np.unique(data_obs['choice'][col])
 
-    fig, axs = plt.subplots(nrows=len(data_obs), ncols=len(cols), figsize=(5, 7))
+    fig, axs = plt.subplots(nrows=len(data_obs), ncols=len(cols), figsize=figsize)
 
     for yi, (y_var, df_obs) in enumerate(data_obs.items()):
-        ln_stl = '' if y_var in data_fit else '-'
-        yerr_label = 'cont_se' if y_var == 'RT' else 'prop_se'
-        ylims = [0.5, 1.2] if y_var == 'RT' else [0, 1]
+        
+        ln_stl = '' if y_var in data_fit else '-'  # draw lines between points if fit data is not provided
+        yerr_type = 'cont_se' if y_var == 'RT' else 'prop_se'
+        ylims = [0.5, 1.2] if y_var == 'RT' else [0, 1] 
 
         for ic, c in enumerate(cols):
             for ih, h in enumerate(hues):
@@ -166,10 +173,10 @@ def plot_behavior_means(data_obs, data_fit=None, col='coherence', hue='modality'
                 if np.sum(inds):
                     temp_df = df_obs.loc[inds, :]
 
-                    axs[yi][ic].errorbar('heading', y='mean', yerr=yerr_label, data=temp_df,
+                    axs[yi][ic].errorbar('heading', y='mean', yerr=yerr_type, data=temp_df,
                                           marker='.', ms=5, mfc=hcol, mec=hcol, linestyle=ln_stl)
 
-                    if y_var in data_fit:
+                    if data_fit is not None and y_var in data_fit:
                         df_fit = data_fit[y_var]
                         df_fit = df_fit.loc[(df_fit[col] == c) & (df_fit[hue] == h)]
                         axs[yi][ic].plot(df_fit['hdgs'], df_fit['yhat'], color=hcol)
@@ -186,21 +193,40 @@ def plot_behavior_means(data_obs, data_fit=None, col='coherence', hue='modality'
 
     plt.show()
 
+    return fig, axs
+
 
 # %%
 
-def plot_RTq_decorator(RTq_func):
-    def wrapper(*args, **kwargs):
+def plot_rtq(RTq_func):
+    def wrapper(row=None, col='modality', hue='heading', *args, **kwargs):
         RTq = RTq_func(*args, **kwargs)
-        sns.relplot(data=RTq, x=RTq[('RT', 'mean')], y=RTq[(kwargs['depvar'], 'mean')], hue='heading', col='modality', style='coherence', kind='line')
+        
+        #sns.relplot(data=RTq, x=RTq['RT']['mean'], y=RTq[kwargs['depvar']]['mean'], row=row, col=col, hue=hue, style=style, kind='line')
+        
+        g = sns.FacetGrid(RTq, row=row, col=col, hue=hue, aspect=1.5, height=4, sharex=False, sharey=False)
+
+        # Iterate through each subplot and plot errorbars
+        def plot_errorbars(data, **kwargs):
+            plt.errorbar(x=data['RT']['mean'], y=data[kwargs['depvar']]['mean'],
+                         xerr=data['RT']['cont_se'], yerr=data[kwargs['depvar']]['prop_se'],
+                         marker='.', markersize=5, capsize=3)
+        g.map_dataframe(plot_errorbars, **kwargs)
+        
+        # Customize labels and legend
+        g.set_axis_labels('RT Mean', f"{kwargs['depvar']} Mean")
+        g.add_legend()
+        
+        # Show the plot
+        plt.show()
+                
         return RTq
     return wrapper
 
 
-@plot_RTq_decorator
+#@plot_rtq
 def RTquantiles(df: pd.DataFrame, by_conds, q_conds=None, nq: int=5, depvar: str = 'PDW', use_abs_hdg=True):
 
-    # TODO this doesn't look quite right at the moment...
     """
 
     :param df:
@@ -211,7 +237,7 @@ def RTquantiles(df: pd.DataFrame, by_conds, q_conds=None, nq: int=5, depvar: str
     :return:
     """
     if q_conds is None:
-        q_conds = by_conds[:-1]
+        q_conds = by_conds
 
     if use_abs_hdg:
         df['heading'] = df['heading'].abs()
@@ -231,50 +257,8 @@ def RTquantiles(df: pd.DataFrame, by_conds, q_conds=None, nq: int=5, depvar: str
         'RT': ['mean', cont_se],
     }
     RTq = df.groupby(by_conds + ['RTq'])[[depvar, 'RT']].agg(agg_funcs).dropna(axis=0).reset_index()
+    RTq.columns = ['_'.join(col) if col[0]==depvar or col[0]=='RT' else col for col in RTq.columns]  # remove multi-level index
 
     return RTq
 
-
-def basic_behavior_analysis(subject, date_range):
-
-    # should just pass in the actual file name?
-    bhv_df_clean = data_cleanup(subject=subject, date_range=date_range)
-
-    # create a single column for PDW, with oneTarg trials coded as 2
-    bhv_df_clean["PDW_1targ"] = bhv_df_clean['PDW']
-    bhv_df_clean.loc[bhv_df_clean['oneTargConf'] == 1, 'PDW_1targ'] = 2
-    bhv_df_clean["PDW_1targ"] = bhv_df_clean['PDW_1targ'].astype("category")
-
-    # df with one-target PDW trials removed
-    bhv_df_noOneTarg = bhv_df_clean.loc[bhv_df_clean['oneTargConf'] == 0]
-    #bhv_df_noOneTarg = bhv_df_clean.loc[(bhv_df_clean['oneTargConf'] == 0) & (bhv_df_clean['delta'] == 0)]
-
-    by_conds = ['modality', 'coherence', 'heading']
-    RTq = RTquantiles(bhv_df_noOneTarg, by_conds=by_conds, q_conds=by_conds, nq=5, depvar='PDW')
-
-    split_by = ['modality', 'coherence', 'heading', 'delta']
-    pRight, pHigh, meanRT = behavior_means(bhv_df_clean, conftask=2, by_conds=split_by)
-
-    # gaussian fits
-    split_by = ['modality', 'coherence', 'delta']
-    p0 = [[0, 3], [0.1, 0, 3, 0.5], [0.1, 0, 3, 0.5]]
-    fit_results = bhv_gauss_fits(bhv_df_noOneTarg, p0=p0, y_vars=('choice','PDW', 'RT'), by_conds=split_by)
-
-    data_obs = {'choice': pRight, 'PDW': pHigh, 'RT': meanRT}
-    plot_behavior_means(data_obs, fit_results, hue='modality', col='coherence')
-
-    # regression analyses
-
-    # 1.
-    formula = 'choice ~ heading + C(modality) + heading*C(modality)'
-    fit_acc = smf.logit(formula, data=bhv_df_clean).fit()
-    print(fit_acc.summary())
-
-    bhv_df_clean['abs_heading'] = np.abs(bhv_df_clean['heading'])
-    formula = 'correct ~ abs_heading*C(PDW_1targ)'
-    fit_p = smf.logit(formula, data=bhv_df_clean).fit()
-    print(fit_p.summary())
-
-
-if __name__ == "__main__":
-    basic_behavior_analysis("lucio", (20220512, 20230605))
+            
