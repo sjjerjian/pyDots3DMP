@@ -13,7 +13,7 @@ import xarray as xr
 from datetime import date
 
 from dataclasses import dataclass, field
-from rate_utils import *
+from neural.rate_utils import *
 
 # %% generic unit class
 
@@ -143,31 +143,39 @@ class Population:
 class PseudoPop:
     """processed firing rates and events data from one or more recordings"""
 
-    # numpy array units x 'trials'/conditions x time
+    # firing rates will be numpy array units x 'trials'/conditions x time
 
-    # if using trial-averaged data, then 2nd dim should be conditions
-    # if using individual trials,
-    # and we want to keep additional array labelling trial/unique conditions
-
-    # timestamps
-
-    subject: None
+    subject: str
     unit_session: np.ndarray = field(repr=False)
     area: np.ndarray = field(repr=False)
-    clus_group: np.ndarray = field(repr=False)
+    clus_group: np.ndarray = field(repr=False, metadata={1: 'MU', 2: 'SU'})
 
     create_date: date = date.today().strftime("%Y%m%d")
 
-    conds: dict = field(default_factory=dict, repr=False)
+    conds: tuple = field(default_factory=tuple, repr=False)
 
-    # align_event:  list[str] = field(default_factory=list)
-    firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
-    timestamps: list[np.ndarray] = field(default_factory=list, repr=False)
+    psth_params: dict = field(default_factory=dict, repr=False)
+
+    firing_rates: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'spikes/sec'})
+    timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
 
     # TODO add in events, and alignment times!!
 
+    def __len__(self):
+        return len(self.unit_session)
+
+    # TODO custom __repr__
+    
     def get_unique_areas(self):
-        return np.unique(self.area)
+        return np.unique(self.area).tolist()
+
+    def filter_units(self, inds):
+        self.unit_session = self.unit_session[inds]
+        self.area = self.area[inds]
+        self.clus_group = self.clus_group[inds]
+        self.firing_rates = self.unit_session[inds, ...]
+
+        return self
 
     
 
@@ -193,7 +201,7 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
 
 
 def trial_psth(spiketimes, align, trange = np.array([np.float64, np.float64]),
-               binsize=0.05, sm_params=dict,
+               binsize=0.05, sm_params: dict = None,
                all_trials=False, normalize: bool = True):
     """
     Parameters
@@ -338,8 +346,11 @@ def trial_psth(spiketimes, align, trange = np.array([np.float64, np.float64]),
         return fr_out, x, spktimes_aligned
 
 
-def smooth_counts(raw_fr, params={'type': 'boxcar', 'binsize': 0.02,
-                                  'width': 0.2, 'sigma': 0.05}):
+def smooth_counts(raw_fr, params: dict = None):
+                  
+    if params is None:
+        params = {'type': 'boxcar', 'binsize': 0.02,
+                  'width': 0.2, 'sigma': 0.05}
 
     N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
 
@@ -362,12 +373,11 @@ def smooth_counts(raw_fr, params={'type': 'boxcar', 'binsize': 0.02,
         win[:(N//2)-1] = 0
         win /= np.sum(win)  # re-normalize here
 
-    smoothed_fr = convolve1d(raw_fr, win, axis=0, mode='nearest')
-    return smoothed_fr
+    return convolve1d(raw_fr, win, axis=0, mode='nearest')
 
 
 def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
-                      binsize=0.05, sm_params={},
+                      binsize=0.05, sm_params: dict = None,
                       condlabels=('modality', 'coherence', 'heading'),
                       return_ds=False):
 
@@ -389,8 +399,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         # trial_psth in list comp is going to generate a list of tuples
         # the zip(*iterable) syntax allows us to unpack the tuples into separate variables
         spike_counts, t_vec, _ = \
-            zip(*[(trial_psth(unit.spiketimes, align, t_r,
-                                      binsize, sm_params))
+            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, sm_params))
                   for unit in units])
 
         rates.append(np.asarray(spike_counts))
@@ -435,7 +444,7 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
                 titles=None, suptitle: str = '', align_label='',
                 other_evs=None, other_ev_labels=None,  # TODO, not yet implemented
                 trange: np.ndarray = np.array([-2, 3]),
-                cmap=None, hue_norm=(-12, 12), binsize: int = 0.05, sm_params=None):
+                cmap=None, hue_norm=(-12, 12), binsize: int = 0.05, sm_params: dict = None):
 
     if sm_params is None:
         sm_params = dict()

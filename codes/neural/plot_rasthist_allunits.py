@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # custom imports
-from codes.behavior.bhv_descriptive import dots3DMP_create_trial_list
-import dots3DMP_FRutils as FRutils
+from behavior.preprocessing import dots3DMP_create_trial_list
+import neural.rate_utils as rates
 
 data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data'
 filename = PurePath(data_folder, 'lucio_neuro_datasets',
@@ -118,7 +118,7 @@ rates, tvecs, conds, _ = \
                                                           binsize, sm_params,
                                                           condlabels)))
 
-rates_cat, _ = FRutils.concat_aligned_rates(rates)
+rates_cat, _ = rates.concat_aligned_rates(rates)
 
 
 # %% cond avg in task, PSTH plotting

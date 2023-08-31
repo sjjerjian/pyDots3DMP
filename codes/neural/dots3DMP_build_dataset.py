@@ -5,29 +5,11 @@ import pandas as pd
 from pathlib import Path, PurePath
 import scipy.io as sio
 import pickle as pkl
-from NeuralDataClasses import Population, ksUnit, PseudoPop
+from neural.NeuralDataClasses import Population, ksUnit
 
 # %% build Population class
 
 def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
-    """
-    Parameters
-    ----------
-    subject : TYPE
-        DESCRIPTION.
-    rec_date : TYPE
-        DESCRIPTION.
-    rec_info : TYPE
-        DESCRIPTION.
-    data : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    rec_popn : TYPE
-        DESCRIPTION.
-
-    """
 
     session = f"{subject}{rec_date}_{rec_info['rec_set']}"
     # filepath = PurePath(data_folder, session)
@@ -101,69 +83,7 @@ def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
 
     return rec_popn
 
-# %%
 
-
-def build_pseudopop(fr_list, conds_dfs, unitlabels, tvecs=None, areas=None, subject=None) -> PseudoPop:
-
-    # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
-
-    # stack firing rates, along unit axis, with insertion on time axis according to t_idx
-    num_units = np.array([x[0].shape[0] for x in fr_list])
-    max_trs = max(list(map(len, list(conds_dfs))))
-
-    stacked_frs = []
-
-    # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
-    # and insert each population fr matrix according to how its tvec lines up with t_unq
-    # need to do this to handle variable start/end references, different sessions might have different lengths
-    # e.g. motionOn - motionOff varies on each trial, and the limit across sessions will also vary
-    # only do it if tvecs is specified, otherwise assume we are just using the interval averages
-
-    t_unq, t_idx = [], []
-    for j in range(len(fr_list[0])):
-
-        u_pos = 0
-        if tvecs is not None:     #or fr_list[0][0].ndim == 2
-
-            if j==0:
-                print("time vector provided, concatenating time-resolved firing rates into pseudo-population\n")
-
-            concat_tvecs = [tvecs[i][j] for i in range(len(tvecs))]
-            t_unq.append(np.unique(np.concatenate(concat_tvecs)))
-            t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
-
-            stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
-            for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
-                u_pos = u_pos + num_units[sess]
-
-        else:
-            if j==0:
-                print("no time provided, concatenating interval average rates into pseudo-population\n")
-
-            stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
-            for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos + num_units[sess], 0:len(conds_dfs[sess])] = fr_list[sess][j]
-                u_pos = u_pos + num_units[sess]
-
-    u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
-    area = [ar for fr, ar in zip(fr_list, areas) for _ in range(fr[0].shape[0])] # TODO deal with area=None
-
-    # stacked_conds = [conds_dfs[u] for u in u_idx]
-
-    pseudo_pop = PseudoPop(
-        subject=subject,
-        firing_rates=stacked_frs,
-        timestamps=t_unq,
-        conds=conds_dfs,
-        clus_group=np.hstack(unitlabels),
-        area=area,
-        unit_session=u_idx,
-    )
-
-    return pseudo_pop
-    
 
 # %% convert cluster group int into cluster label
 
@@ -182,7 +102,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
     # TODO - clean this up...make file user selectable, and remove hard-coded files
     
     # subject = input("Enter subject:")
-    subject = data_file[0:5]
+    subject = Path(data_file).name[0:5]
     datapath = '/Volumes/homes/fetschlab/data/'
     data_folder = Path(datapath, subject, f'{subject}_neuro/')
 
@@ -208,6 +128,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
     par_names = ['tuning', 'task', 'rf', 'ves']
     par_labels = ['dots3DMPtuning', 'dots3DMP', 'RFmapping', 'VesMapping']
 
+    # TODO keep all pars here...
     pars = ['Tuning', 'Task']
 
     rec_df = rec_info.copy(deep=True)
@@ -226,7 +147,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
         if not rec_sess_info['is_good']:
             continue
 
-        print(f"Adding {rec_date}, set {rec_set}\n")
+        print(f"Adding {rec_date}, set {rec_set}, {rec_sess_info['area']}\n")
 
         for p, par in enumerate(pars):
 
@@ -234,7 +155,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
                     par_labels[p] in sess['data'].keys():
 
                 rec_popn = build_rec_popn(
-                    subject, rec_date, rec_sess_info, data=sess['data'][par_labels[p]], data_folder=rec_folder
+                    subject, rec_date, rec_sess_info, data=sess['data'][par_labels[p]],
                     )
 
                 rec_df.loc[index, par] = rec_popn
@@ -249,8 +170,8 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
 
 if __name__ == '__main__':
 
-    mat_data_file = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data/ \
-        lucio_neuro_datasets/lucio_20220512-20230602_neuralData.mat'
-    rec_info_file = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/RecSessionInfo.xlsx'
+    mat_data_file = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data/lucio_neuro_datasets/lucio_20220512-20230602_neuralData.mat'
+    rec_info_file = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/info/RecSessionInfo.xlsx'
 
     create_dataset(mat_data_file, rec_info_file)
+# %%
