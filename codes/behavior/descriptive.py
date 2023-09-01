@@ -22,8 +22,9 @@ from behavior.preprocessing import prop_se, cont_se, gaus
 # 5. regression analyses
 
 
-def behavior_means(df, by_conds='heading'):
+def behavior_means(df, by_conds='heading', long_format=True):
 
+    # TODO fix this up, we 
     # p_right = _groupbyconds(df, by_conds, 'choice', prop_se)
     # p_high = _groupbyconds(df, by_conds, 'PDW', prop_se)
     # mean_rt = _groupbyconds(df, by_conds, 'RT', cont_se)
@@ -32,17 +33,60 @@ def behavior_means(df, by_conds='heading'):
 
     agg_funcs = {
         'choice': ['count', 'mean', prop_se],
-        'PDW': ['mean', prop_se],
-        'RT': ['mean', cont_se],
-        'correct': ['mean', prop_se],
+        'PDW': ['count', 'mean', prop_se],
+        'RT': ['count', 'mean', cont_se],
+        'correct': ['count', 'mean', prop_se],
     }
     agg_funcs = {k:v for k,v in agg_funcs.items() if k in df.columns}
 
-    return df.groupby(by=by_conds)[list(agg_funcs.keys())].agg(agg_funcs).dropna(axis=0).reset_index()
+    output_vars = list(agg_funcs.keys())
+
+    df_means = df.groupby(by=by_conds)[output_vars].agg(agg_funcs).dropna(axis=0).reset_index()
+    df_means.columns = ['_'.join(col) if col[0] in output_vars else col[0] for col in df_means.columns]  # remove multi-level index
+
+    if long_format:
+        count_melt = df_means.melt(
+            id_vars=by_conds, 
+            value_vars=df_means.columns[df_means.columns.str.contains('count')],
+            var_name='variable', value_name='count')
+
+        means_melt = df_means.melt(
+            id_vars=by_conds, 
+            value_vars=df_means.columns[df_means.columns.str.contains('mean')],
+            var_name='variable', value_name='mean')
+
+        sems_melt = df_means.melt(
+            id_vars=by_conds, 
+            value_vars=df_means.columns[df_means.columns.str.contains('_se')],
+            var_name='variable', value_name='se')
+
+        df_means = count_melt.copy()
+        df_means['mean'] = means_melt['mean']
+        df_means['se'] = sems_melt['se']
+        
+        df_means['variable'] = df_means['variable'].apply(lambda x: x.split('_')[0])
+    
+    return df_means
 
 
-# def _groupbyconds(df, by_conds, data_col, errfcn):
-#     return df.groupby(by=by_conds)[data_col].agg([np.mean, errfcn]).dropna(axis=0).reset_index()
+def _groupbyconds(df, by_conds, data_col, errfcn):
+    group_res = df.groupby(by=by_conds)[data_col].agg(['count', 'mean', errfcn]).dropna(axis=0).reset_index()
+    group_res = group_res.rename(columns={errfcn.__name__: "sem"})
+    return group_res
+
+
+def replicate_ves(df):
+    """
+    replicate vestibular condition rows, for every coherence level
+    """
+    dup_ves = df.loc[df['modality']==1, :]
+    ucohs = np.unique(df['coherence'])
+
+    for ucoh in ucohs:
+        dup_ves['coherence'] = ucoh
+        df = pd.concat([df, dup_ves])
+
+    return df
 
 
 def logit_fit_choice_hdg(df, num_hdgs: int = 200) -> pd.Series:
