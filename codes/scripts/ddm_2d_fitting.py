@@ -1,20 +1,24 @@
 # %% imports
 
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 import pickle
 
 from ddm_moi.Accumulator import AccumulatorModelMOI
 from ddm_moi.ddm_2d import *
 
 from behavior.preprocessing import dots3DMP_create_trial_list
-from behavior.descriptive import behavior_means, plot_behavior_hdg
+from behavior.descriptive import *
 
 from pybads import BADS
 #from scipy.optimize import minimize
 
-# %% generate (and save) simulated data
+# %% ===== generate (and save) simulated data =====
 
-sim_params = {'kmult': 15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
+sim_params = {'kmult': 0.15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
                 'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
         
 mods = np.array([1, 2, 3])
@@ -29,6 +33,7 @@ accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 
 sim_data, _ = ddm_2d_generate_data(sim_params, data=trial_table, 
                                          accumulator=accum, method='simulate', return_wager=True)
 
+# TODO, option to save save sim_data as csv
 with open(f"../data/sim_behavior_202308_{nreps}reps.pkl", "wb") as file:
     pickle.dump((sim_data, sim_params), file, protocol=-1)
 
@@ -67,17 +72,16 @@ plb, pub = init_params_array * 0.3, init_params_array * 3
 # plb = np.array([0.14, 0.98, 0.98, 0.03, 0.6, 0.6, 0.6, 0.05, 0.1, 0.1, 0.03])
 # pub = np.array([0.16, 1.02, 1.02, 0.1, 1, 1, 1, 0.35, 0.35, 0.35, 0.1])
 
-# first fit choice and RT only
+# %% ===== Fit choice and RT =====
+
 target = lambda params: ddm_2d_objective(params, init_params, fixed,
                                          data=data, accumulator=accum,
                                          outputs=['choice', 'RT'], llh_scaling=[1, 0.1])
 
 # fit using Bayesian Adaptive Direct Search (BADS)
-fit_options = {'random_seed': 42} # for reproducibility
+fit_options = {'random_seed': 42} # for testing/reproducibility
+# eventually initialize multiple times from different starting points
 bads = BADS(target, init_params_array, lb, ub, plb, pub, options=fit_options)
-
-# %% ===== Fit choice and RT =====
-
 bads_result = bads.optimize()  # not bad...
 
 # using scipy optimize minimize
@@ -97,7 +101,7 @@ bads_result = bads.optimize()  # not bad...
 # %% now take the fitted parameters, and generate predicted data for the same conditions as observed data
 
 fitted_params = {
-    'kmult': 15, 'bound': np.array([1, 1]),
+    'kmult': 0.15, 'bound': np.array([1, 1]),
     'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
     'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06
     }
