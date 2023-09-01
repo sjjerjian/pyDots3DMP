@@ -184,74 +184,41 @@ def cue_weighting(fit_results):
 # %%
 
 
-def plot_behavior_hdg(data_obs: dict, data_fit: dict = None, col='coherence', hue='modality', hue_colors='krb', figsize: tuple=(5, 7), y_vars: list = None, labels: list = None):
+def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='coherence',
+                      hue: str = 'modality', palette=sns.color_palette(),
+                      **fig_kwargs):
+    
+    def _errbar_plot(x, y, yerr, **kwargs):
+        plt.errorbar(x, y, yerr, **kwargs)
 
-    # TODO test that this is flexible enough to plot with different configs e.g. hue = delta, or with hue = coherence and col as delta
-    # TODO add in pCorrect
-    # TODO plan out more general/alternative version which can handle results from model fitting, maybe reconfigure data_obs and data_fit just to be df
-    #    (create a decorator which converts data_obs and data_fit from the list of dicts to single dataframe (since the trial conditions should be the same))
-
-    if y_vars is None:
-        y_vars = ['choice', 'PDW', 'RT']
-
-    if labels is None:
-        labels = ['pRight', 'pHigh', 'mean RT (s)']
+    # plot the empirical data points
         
-    if isinstance(data_obs, pd.DataFrame) and isinstance(data_fit, pd.DataFrame):
+    g = sns.FacetGrid(data_obs, row=row, col=col, hue=hue, palette=palette,
+                      **fig_kwargs)
+    g.map(_errbar_plot, 'heading', 'mean', 'se',
+            linestyle='', marker='.')
 
-        #g = sns.FacetGrid(data=)
-        # use map here!
-        hdgs = np.unique(data_obs['heading'])
-        hues = np.unique(data_obs[hue])
-        cols = np.unique(data_obs[col])
-
+    # overlay the fit data as a line
+    for ax_key, ax in g.axes_dict.items():
+        ax_data = data_fit.loc[data_fit[col]==ax_key[1]]
+        sns.lineplot(data=ax_data, x='heading', y=ax_key[0],
+                        hue=hue, ax=ax, palette=palette)
         
-
-    elif isinstance(data_obs, dict) and isinstance(data_fit, dict):
-
-        hdgs = np.unique(data_obs['choice']['heading'])
-        hues = np.unique(data_obs['choice'][hue])
-        cols = np.unique(data_obs['choice'][col])
-
-        fig, axs = plt.subplots(nrows=len(y_vars), ncols=len(cols), figsize=figsize)
-
-        for yi, (y_var, df_obs) in enumerate(data_obs.items()):
-            
-            ln_stl = '' if y_var in data_fit else '-'  # draw lines between points if fit data is not provided
-            yerr_type = 'cont_se' if y_var == 'RT' else 'prop_se'
-            ylims = [0.5, 1.2] if y_var == 'RT' else [0, 1] 
-
-            for ic, c in enumerate(cols):
-                for ih, h in enumerate(hues):
-                    hcol = hue_colors[ih]
-
-                    inds = (df_obs[col] == c) & (df_obs[hue] == h)
-
-                    if np.sum(inds):
-                        temp_df = df_obs.loc[inds, :]
-
-                        axs[yi][ic].errorbar('heading', y='mean', yerr=yerr_type, data=temp_df,
-                                            marker='.', ms=5, mfc=hcol, mec=hcol, linestyle=ln_stl)
-
-                        if data_fit is not None and y_var in data_fit:
-                            df_fit = data_fit[y_var]
-                            df_fit = df_fit.loc[(df_fit[col] == c) & (df_fit[hue] == h)]
-                            axs[yi][ic].plot(df_fit['hdgs'], df_fit['yhat'], color=hcol)
-
-                # TODO more cosmetic stuff
-                axs[yi][ic].set_xticks(hdgs)
-                axs[yi][ic].set_ylim(ylims)
-                axs[yi][ic].set_ylabel(labels[yi])
-
-                # seaborn alternative
-                # axs[0][c] = sns.lineplot(x='heading', y='mean', hue=hue, errorbar=None,
-                #               data=df_obs.loc[df_obs['coherence']==coh], palette=hue_colors,
-                #               ax=axs[yi][c])
-
+        if 'choice' in ax_key:
+            ax.set_title(f"coh = {ax_key[1]}")
+            ax.set_ylim([0, 1])
+            ax.set_ylabel('prop. right')
+        elif 'PDW' in ax_key:
+            ax.set_ylim([0, 1])
+            ax.set_ylabel('prop. high')
+        elif 'RT' in ax_key:
+            ax.set_ylim([0.5, 1.2])
+            ax.set_ylabel('mean RT (s)')    
+        ax.set_xticks(np.unique(data_obs['heading']))
+    
     plt.show()
 
-    return fig, axs
-
+    return g   
 
 # %%
 
