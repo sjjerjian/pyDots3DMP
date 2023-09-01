@@ -136,19 +136,25 @@ model_data, _ = ddm_2d_generate_data(params=fitted_params, data=data_pred,
                                      )
 
 
-# %%
+# %% Plot zero conflict data (all modalities)
 
 # actual means from the data
 by_conds = ['modality', 'coherence', 'heading', 'delta']
-data_means = behavior_means(data, by_conds=by_conds)
-pred_means = behavior_means(model_data, by_conds=by_conds) # technically redundant if nreps = 1
+df_means = behavior_means(data, by_conds=by_conds, long_format=True).pipe(replicate_ves)
+# pred_means = behavior_means(model_data, by_conds=by_conds) # redundant if nreps = 1
 
-# TODO plot it
+g_conds = ['modality', 'coherence', 'delta']
+p0 = [[0, 3], [0.1, 0, 3, 0.5], [0.1, 0, 3, 0.5]]
+fit_results = gauss_fit_hdg_group(data, p0=p0, y_vars=('choice','PDW', 'RT'), by_conds=g_conds)
+fit_df = fit_results_to_dataframe(fit_results, by_conds=g_conds).pipe(replicate_ves)
 
+plot_behavior_hdg(df_means, fit_df, row='variable', col='coherence',
+                      hue='modality', palette=sns.color_palette("Set2", 3))
 
+# %% Plot combined condition (different conflicts)
 
-
-
-
-print('Main done')
+# combined only, all cue conflicts
+# data_deltas = data_melt.loc[data_melt['modality']==3, :]
+# g = sns.FacetGrid(data_deltas, row='variable', col='coherence', hue='delta')
+# g.map(errbar_plot, 'heading', 'mean', 'sem', linestyle='-', marker='.')
 # %%
