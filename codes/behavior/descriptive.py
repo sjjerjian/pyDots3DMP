@@ -166,9 +166,6 @@ def fit_results_to_dataframe(fit_results, by_conds = 'modality'):
     return fit_df
 
 
-
-
-
 # %%
 
 def cue_weighting(fit_results):
@@ -185,15 +182,15 @@ def cue_weighting(fit_results):
 
 
 def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='coherence',
-                      hue: str = 'modality', palette=sns.color_palette(),
-                      **fig_kwargs):
+                      hue: str = 'modality', palette=sns.color_palette(), **fig_kwargs):
     
     def _errbar_plot(x, y, yerr, **kwargs):
         plt.errorbar(x, y, yerr, **kwargs)
 
     # plot the empirical data points
         
-    g = sns.FacetGrid(data_obs, row=row, col=col, hue=hue, palette=palette,
+    g = sns.FacetGrid(data_obs, row=row, col=col, hue=hue,
+                      palette=palette, sharey=False,
                       **fig_kwargs)
     g.map(_errbar_plot, 'heading', 'mean', 'se',
             linestyle='', marker='.')
@@ -204,6 +201,7 @@ def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='cohe
         sns.lineplot(data=ax_data, x='heading', y=ax_key[0],
                         hue=hue, ax=ax, palette=palette)
         
+        ax.set_title("")
         if 'choice' in ax_key:
             ax.set_title(f"coh = {ax_key[1]}")
             ax.set_ylim([0, 1])
