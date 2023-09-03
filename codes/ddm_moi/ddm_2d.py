@@ -10,41 +10,26 @@ from ddm_moi.Accumulator import AccumulatorModelMOI
 
 
 def optim_decorator(loss_func):
-
     def wrapper(params: np.ndarray, init_params: OrderedDict, fixed: np.ndarray = None, *args, **kwargs):
    
-        # params has to already be an array, because it is the first argument in the optimization function
-        # init_params should be ordered dicts, so here I extract array format
-        # to replace params with init_params where fixed index is true
-
         if fixed is None:
             fixed = np.zeros_like(params)
 
         if 'PDW' in kwargs['outputs']:
-            param_keys = ['kmult', 'bound', 'alpha', 'theta', 'ndt', 'sigma_ndt']
+            param_keys = ['kmult', 'bound', 'ndt', 'sigma_ndt', 'theta', 'alpha']
         else:
             param_keys = ['kmult', 'bound', 'ndt', 'sigma_ndt']
 
+        # convert initial parameters to array, to replace params where fixed is true
         init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
         params_array = set_params_list(params, init_params_array, fixed)
 
+        # TODO do we really care about the order here? maybe not, but certainly above, because
+        # fixed and bounds are specified as an array, so we need to be sure that the ordering of params in the array
+        # matches what we expect
+
         # convert back to OrderedDict for passing to loss function
-        params_dict = OrderedDict()
-        current_index = 0
-        for key, value in init_params.items():
-            if isinstance(value, list):
-                value_length = len(value)
-                params_dict[key] = params_array[current_index:current_index + value_length]
-            elif isinstance(value, np.ndarray):
-                value_length = value.shape[0]
-                params_dict[key] = params_array[current_index:current_index + value_length]
-            else:
-                value_length = 1
-                params_dict[key] = params_array[current_index]
-            current_index += value_length
-
-
-        #print(params_dict)
+        params_dict = set_params_dict_from_array(params_array, init_params)
 
         ii = 0
         for key, val in params_dict.items():
@@ -103,8 +88,27 @@ def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndar
     return np.array(values_list)
 
 
+def set_params_dict_from_array(params_array: np.ndarray, ref_dict: dict):
+    
+    params_dict = OrderedDict()
+    current_index = 0
+    for key, value in ref_dict.items():
+        if isinstance(value, list):
+            value_length = len(value)
+            params_dict[key] = params_array[current_index:current_index + value_length]
+        elif isinstance(value, np.ndarray):
+            value_length = value.shape[0]
+            params_dict[key] = params_array[current_index:current_index + value_length]
+        else:
+            value_length = 1
+            params_dict[key] = params_array[current_index]
+        current_index += value_length
+
+    return params_dict
+
+
 @optim_decorator
-def ddm_2d_objective(params: dict, data: pd.DataFrame,
+def objective(params: dict, data: pd.DataFrame,
                      accumulator: AccumulatorModelMOI,
                      outputs=None, llh_scaling=None):
 
