@@ -161,7 +161,6 @@ def generate_data(params: dict, data: pd.DataFrame(),
     :return:
     """
 
-    # TODO add RT_method ' to return likelihood, or mean RT, or max of distribution'
     # TODO urgency and ves/vis scaling
     # TODO add wager_method options: 'log_odds', 'time', 'evidence'
     # TODO add cue weighting options: 'optimal', 'random', 'fixed'
@@ -254,9 +253,13 @@ def generate_data(params: dict, data: pd.DataFrame(),
                 if method == 'simulate' or method == 'sim':
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
+                start_time = time.time()
                 # calculate cdf and pdfs using signed drift rates now
                 accumulator.set_drifts(list(drifts), hdgs)
                 accumulator.dist(return_pdf=return_wager)
+                end_time = time.time()
+
+                print(f"Time to run accum dist: {(end_time-start_time):.2f}s\n")
 
                 for h, hdg in enumerate(hdgs):
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
