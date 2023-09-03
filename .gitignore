@@ -2,5 +2,5 @@
 .idea/
 *.xml
 *.pkl
-
+*/pydots3DMP.egg-info/*
 *.pyc
