@@ -120,7 +120,8 @@ def objective(params: dict, data: pd.DataFrame,
     return_pdf = 'PDW' in outputs
 
     # get model predictions (probabilistic) given parameters and trial conditions in data
-    model_data, _ = ddm_2d_generate_data(params=params, data=data, accumulator=accumulator, method='prob', return_wager=return_pdf)
+    model_data, _ = generate_data(params=params, data=data, accumulator=accumulator,
+                                  method='prob', return_wager=return_pdf)
 
     # calculate log likelihoods of parameters, given observed data
 
@@ -142,10 +143,10 @@ def objective(params: dict, data: pd.DataFrame,
     return neg_llh, model_llh, model_data
 
 
-def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
-                         accumulator: AccumulatorModelMOI = AccumulatorModelMOI(),
-                         method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
-                         return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
+def generate_data(params: dict, data: pd.DataFrame(),
+            accumulator: AccumulatorModelMOI = AccumulatorModelMOI(),
+            method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
+            return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Given an accumulator model and trial conditions, this function generates model outputs for behavioral variables.
     Setting method = 'simulate' will simulate decision variables on individual trials
