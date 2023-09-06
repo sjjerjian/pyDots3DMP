@@ -3,6 +3,9 @@ import numpy as np
 import pandas as pd
 from pathlib import Path, PurePath
 
+from itertools import product
+
+
 # %% helper functions
 
 def prop_se(x):
@@ -139,7 +142,7 @@ def format_onetargconf(df: pd.DataFrame, remove_one_targ: bool = True) -> pd.Dat
 
 
 def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
-                               nreps: int = 1, shuff: bool = True) -> tuple[pd.DataFrame, int]:
+                               nreps: int = 1, shuff: bool = True) -> pd.DataFrame:
 
     # if shuff:
     #     np.random.seed(42)  # for reproducibility
@@ -180,13 +183,32 @@ def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
                 modality[these] = 3
 
     # Now replicate times nreps and shuffle (or not):
-    condlist = np.column_stack((modality, coh, hdg, delta))
+    condlist = np.column_stack((modality, coh, delta, hdg))
     trial_table = np.tile(condlist, (nreps, 1))
     ntrials = len(trial_table)
 
     if shuff:
+        # TODO allow rng input
         trial_table = trial_table[np.random.permutation(ntrials)]
 
-    trial_table = pd.DataFrame(trial_table, columns=['modality', 'coherence', 'heading', 'delta'])
+    trial_table = pd.DataFrame(trial_table, columns=['modality', 'coherence', 'delta', 'heading'])
 
-    return trial_table, ntrials
+    return trial_table
+
+
+def add_trial_outcomes(trial_table: pd.DataFrame, outcomes: dict = None) -> pd.DataFrame:
+
+    if outcomes is None:
+        outcomes = {'choice': [0, 1], 'PDW': [0, 1], 'oneTargConf': [0]}
+
+    combinations = list(product(*outcomes.values()))
+    df = pd.DataFrame(combinations, columns=outcomes.keys())
+    
+    new_trial_table = trial_table.loc[trial_table.index.repeat(len(df))].reset_index(drop=True)
+    df_rep = pd.concat([df] * len(trial_table), ignore_index=True)
+    new_trial_table = pd.concat([new_trial_table, df_rep], axis=1)
+
+    return new_trial_table
+
+
+
