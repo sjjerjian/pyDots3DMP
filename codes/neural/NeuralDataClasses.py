@@ -144,25 +144,26 @@ class PseudoPop:
     # firing rates will be numpy array units x 'trials'/conditions x time
 
     subject: str
-    unit_session: np.ndarray = field(repr=False)
+
     area: np.ndarray = field(repr=False)
+    unit_session: np.ndarray = field(repr=False)
+
     clus_group: np.ndarray = field(repr=False, metadata={1: 'MU', 2: 'SU'})
 
-    create_date: date = date.today().strftime("%Y%m%d")
-
     conds: tuple = field(default_factory=tuple, repr=False)
-
     psth_params: dict = field(default_factory=dict, repr=False)
 
     firing_rates: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'spikes/sec'})
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
+
+    create_date: date = date.today().strftime("%Y%m%d")
 
     # TODO add in events, and alignment times!!
 
     def __len__(self):
         return len(self.unit_session)
 
-    # TODO custom __repr__
+    # TODO custom __repr__?
     
     def get_unique_areas(self):
         return np.unique(self.area).tolist()

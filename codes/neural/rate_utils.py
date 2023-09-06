@@ -146,11 +146,11 @@ def build_pseudopop(popn_dfs, tr_tab,
         # re-assign conds_dfs to unique conditions
         conds_dfs = cond_groups
 
+    # TODO assign relative event times (median?) for each unit/session somwehere in pseudopop!!
     if 'other_ev' in t_params:
-        for popn in popn_dfs:
-            rel_event_times = popn.popn_rel_event_times(align=t_params['align_ev'], 
-                                                        others=t_params['other_ev'])
-
+        popn_dfs.apply(lambda x: x.popn_rel_event_times(
+            align=t_params['align_ev'], others=t_params['other_ev']))
+            
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
     # stack firing rates, along unit axis, with insertion on time axis according to t_idx
@@ -166,6 +166,8 @@ def build_pseudopop(popn_dfs, tr_tab,
     # only do it if tvecs is specified, otherwise assume we are just using the interval averages
 
     t_unq, t_idx = [], []
+
+    # loop over alignments
     for j in range(len(fr_list[0])):
 
         u_pos = 0
@@ -192,9 +194,11 @@ def build_pseudopop(popn_dfs, tr_tab,
                 stacked_frs[j][u_pos:u_pos + num_units[sess], 0:len(conds_dfs[sess])] = np.squeeze(fr_list[sess][j])
                 u_pos = u_pos + num_units[sess]
 
+    # list of area, session number, and unit number within session, for each unit
+    area = [p.area for n, p in zip(num_units, popn_dfs) for _ in range(n)] # TODO deal with area=None
     u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
-    area = [p.area for fr, p in zip(fr_list, popn_dfs) for _ in range(fr[0].shape[0])] # TODO deal with area=None
 
+    # make conditions list the same size as units (replicate conditions list for units within the same session)
     # stacked_conds = [conds_dfs[u] for u in u_idx]
 
     pseudo_pop = PseudoPop(

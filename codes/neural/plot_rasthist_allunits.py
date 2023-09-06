@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Sat May  6 18:39:16 2023
-
-@author: stevenjerjian
-"""
+# %% ========================
+# imports 
 
 import numpy as np
-from pathlib import PurePath
 import pandas as pd
+
+from pathlib import PurePath
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -17,9 +13,12 @@ from matplotlib.backends.backend_pdf import PdfPages
 from behavior.preprocessing import dots3DMP_create_trial_list
 import neural.rate_utils as rates
 
+
+# %% ===== load data =====
+
 data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data'
-filename = PurePath(data_folder, 'lucio_neuro_datasets',
-                    'lucio_20220512-20230411_neuralData.pkl')
+filename = 'lucio_20220512-20230602_neuralData.pkl'
+filename = PurePath(data_folder, 'lucio_neuro_datasets', filename)
 
 with open(filename, 'rb') as file:
     data = pd.read_pickle(file)
@@ -27,7 +26,7 @@ with open(filename, 'rb') as file:
 par = ['Tuning', 'Task']
 data = data[data[par].notna().all(axis=1)][par]  # drop sessions without par
 
-# %% set trial table
+# %% ===== set trial table =====
 
 condlabels = ['modality', 'coherenceInd', 'heading', 'delta']
 mods = np.array([1, 2, 3])
@@ -47,7 +46,7 @@ sess, unit = 0, 0  # session, unit
 align_ev = 'stimOn'
 
 events = data['Task'][sess].events
-good_trs = events['goodtrial'].to_numpy(dtype='bool')
+good_trs = ((events['goodtrial'] & ~events['oneTargConf'])).to_numpy(dtype='bool')
 condlist = events[condlabels].loc[good_trs, :]
 
 align = events.loc[good_trs, align_ev].to_numpy(dtype='float64')
@@ -63,7 +62,6 @@ rh_fig, rh_ax = data['Task'][sess].units[unit].plot_raster(
 
 # %% all rh plots
 
-
 align_ev = 'stimOn'
 thisPar = 'Task'
 
@@ -77,7 +75,7 @@ plt.ioff()
 with PdfPages('allunits_rasterhist.pdf') as pdf_file:
 
     for sess in this_par_data:
-        good_trs = sess.events['goodtrial'].to_numpy(dtype='bool')
+        good_trs = ((sess.events['goodtrial'] & ~sess.events['oneTargConf'])).to_numpy(dtype='bool')
         condlist = sess.events[condlabels].loc[good_trs, :]
 
         align = sess.events.loc[good_trs, align_ev].to_numpy(dtype='float64')
@@ -95,45 +93,4 @@ with PdfPages('allunits_rasterhist.pdf') as pdf_file:
                                                  sm_params=sm_params)
                 pdf_file.savefig(rh_fig)
 
-
-
-# %% trial firing rates
-
-# get all unit firing rates across trials/conds, for tuning and task
-
-
-binsize = 0.05
-
-
-sm_params = {}
-# sm_params = {'type': 'boxcar', 'binsize': binsize, 'width': 0.2}
-# sm_params = {'type': 'gaussian', 'binsize': binsize,
-#             'width': 0.5, 'sigma': 0.05}
-
-align_ev = ['stimOn', 'stimOff']
-trange = np.array([[-1, 1.25], [-0.3, 1]])
-
-rates, tvecs, conds, _ = \
-    zip(*data['Task'].apply(lambda x: x.calc_firing_rates(align_ev, trange,
-                                                          binsize, sm_params,
-                                                          condlabels)))
-
-rates_cat, _ = rates.concat_aligned_rates(rates)
-
-
-# %% cond avg in task, PSTH plotting
-
-# cond_frs, cond_groups = [], []
-# for f_in, cond in zip(rates_cat, conds):
-
-#     # avg firing rate over time across units, each cond, per session
-#     f_out, _, cg = FRutils.condition_averages(f_in, cond, cond_groups=tr_tab)
-#     cond_frs.append(f_out)
-#     cond_groups.append(cg)
-
-# # stack 'em up. all units x conditions x time
-# cond_frs_stacked = np.vstack(cond_frs)
-
-
-# %%
 
