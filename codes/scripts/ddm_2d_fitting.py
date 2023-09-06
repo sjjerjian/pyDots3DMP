@@ -38,14 +38,16 @@ with open(f"../data/sim_behavior_202308_{nreps}reps.pkl", "wb") as file:
     pickle.dump((sim_data, sim_params), file, protocol=-1)
 
 
-# %% ===== load data =====
+# %% ===== load simulated data =====
 
 # nreps = 200
 # filename = f"../../data/sim_behavior_202308_{nreps}reps.pkl" # replace with real data
 # with open(f"../../data/sim_behavior_202308_{nreps}reps.pkl", "rb") as file:
 #     data, sim_params = pickle.load(file)
 
-filename = "/Users/stevenjerjian/Desktop/FetschLab/PLDAPS_data/dataStructs/lucio_20220512-20230605.csv"
+# %% ===== load real monkey data =====
+
+filename = "/Users/stevenjerjian/Desktop/FetschLab/PLDAPS_data/dataStructs/lucio_20220512-20230606.csv"
 
 data = data_cleanup(filename)
 data = format_onetargconf(data, remove_one_targ=True)
@@ -55,8 +57,11 @@ accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.05), grid_vec=np.arange(-3, 0
 
 # %% ===== set parameters for optimization =====
 
+# fit zero conflict only
+data_delta0 = data.loc[data['delta']==0, :]
+
 # first fitting choice and RT only
-init_params = {'kmult': 0.3, 'bound': np.array([0.8, 0.8]), 'ndt': [0.2, 0.4, 0.3], 'sigma_ndt': 0.06}
+init_params = {'kmult': 0.3, 'bound': np.array([0.8, 0.8]), 'ndt': [0.15, 0.25, 0.2], 'sigma_ndt': 0.06}
 init_params_array = ddm_2d.get_params_array_from_dict(init_params)
 
 fixed = np.ones_like(init_params_array)
@@ -68,19 +73,16 @@ fixed[:-1] = 0 # fitting all except sigma_ndt
 # plb, pub = init_params_array * 0.3, init_params_array * 5
 
 lb = np.array([0.05, 0.3, 0.3, 0.05, 0.05, 0.05, 0])
-ub = np.array([1.0,  1.5, 1.5, 0.5, 0.5, 0.5, 0.15])
+ub = np.array([3,  2, 2, 0.5, 0.5, 0.5, 0.15])
 
 plb = np.array([0.1, 0.5, 0.5, 0.1, 0.1, 0.1, 0.03])
-pub = np.array([0.7,  1.3, 1.3, 0.4, 0.4, 0.4, 0.1])
+pub = np.array([2,  1.5, 1.5, 0.3, 0.4, 0.3, 0.1])
 
-# %% ===== Fit choice and RT =====
-
-# fit zero conflict only
-data_delta0 = data.loc[data['delta']==0, :]
+# %% ===== RUN IT =====
 
 target = lambda params: ddm_2d.objective(params, init_params, fixed,
                                          data=data_delta0, accumulator=accum,
-                                         outputs=['choice', 'RT'], llh_scaling=[1, 0.1])
+                                         outputs=['choice', 'RT'], llh_scaling=[1, 1])
 
 # fit using Bayesian Adaptive Direct Search (BADS)
 fit_options = {'random_seed': 42} # for testing/reproducibility
@@ -95,7 +97,7 @@ bads_result = bads.optimize()
 #                args=args_tuple, options=fit_options)
 
 
-# TODO make a simple loop to re-run with multiple starting points
+# TODO make a simple loop to re-run with multiple starting points?
 
 # %% ===== re-run optimization, but now with PDW =====
 # rerun (with tight bounds on all already fitted parameters, except alpha and theta)
@@ -131,7 +133,6 @@ bads_result_wpdw = bads_wpdw.optimize()
 
 # %% now take the fitted parameters, and generate predictions
 
-
 # 
 # fitted_params = {
 #     'kmult': 0.350975, 'bound': np.array([0.970, 0.967]),
@@ -139,27 +140,34 @@ bads_result_wpdw = bads_wpdw.optimize()
 #     'ndt': [0.465], 'sigma_ndt': 0.06,
 #     }
 
+# fitted_params = {
+#     'kmult': 0.412, 'bound': np.array([0.6, 0.6]),
+#     'alpha': 0.064, 'theta': [1, 0.845, 0.961],
+#     'ndt': [0.423, 0.6, 0.480], 'sigma_ndt': 0.06,
+#     }
+
+# fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
+# fitted_params['sigma_ndt'] = 0.06
+
 fitted_params = {
-    'kmult': 0.6, 'bound': np.array([0.6, 0.6]),
-    'alpha': 0.064, 'theta': [1, 0.845, 0.961],
-    'ndt': [0.423, 0.6, 0.480], 'sigma_ndt': 0.06,
+    'kmult': 0.462, 'bound': np.array([0.651, 0.652]),
+    'ndt': [0.397, 0.5, 0.45], 'sigma_ndt': 0.06,
     }
 
 # generate conditions list for prediction
-num_hdgs = 200              # to plot a smooth curve of model prediction over headings
+num_hdgs = 20              # to plot a smooth curve of model prediction over headings
 nreps = 1                   # returning probability predictions, so only really need 1 'repetition' 
 pred_method = 'probability' # return the model prediction as probability (for choice and PDW)
 rt_method = 'mean'          # return the expected value of RT, given the model's prediction of the distribution
 
 mods = np.array([1, 2, 3])
-cohs = np.array([0.3, 0.7])
+cohs = np.array([0.2, 0.7])
 hdgs = np.array(np.linspace(-12, 12, num_hdgs))  # to plot a smooth fit
 deltas = np.array([-3, 0, 3]) # now include deltas
 data_pred, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
 
-
 model_data, _ = ddm_2d.generate_data(params=fitted_params, data=data_pred, accumulator=accum, 
-                                     method=pred_method, rt_method=rt_method, return_wager=True)
+                                     method=pred_method, rt_method=rt_method, return_wager=False)
 
 
 # %% Plot zero conflict data (all modalities)
@@ -176,10 +184,13 @@ model_data, _ = ddm_2d.generate_data(params=fitted_params, data=data_pred, accum
 
 by_conds = ['modality', 'coherence', 'heading']
 df_means = behavior_means(data_delta0, by_conds=by_conds, long_format=True).pipe(replicate_ves)
+df_means = df_means[df_means['variable'] != 'correct']
+df_means = df_means[df_means['variable'] != 'PDW']
 
-model_data_delta0 = model_data.loc[model_data['delta']==0, :]
 
-plot_behavior_hdg(df_means, model_data_delta0, row='variable', col='coherence',
+model_data_delta0 = model_data.loc[model_data['delta']==0, :].pipe(replicate_ves)
+
+g= plot_behavior_hdg(df_means, model_data_delta0, row='variable', col='coherence',
                       hue='modality', palette=sns.color_palette("Set2", 3))
 
 
@@ -190,3 +201,14 @@ plot_behavior_hdg(df_means, model_data_delta0, row='variable', col='coherence',
 # g = sns.FacetGrid(data_deltas, row='variable', col='coherence', hue='delta')
 # g.map(errbar_plot, 'heading', 'mean', 'sem', linestyle='-', marker='.')
 # %%
+
+
+def result_to_json(result, json_filename):
+
+    del result['fun']
+
+    result['x'] = result['x'].tolist()
+    result['x0'] = result['x0'].tolist()
+
+    with open(json_filename, 'w') as json_file:
+        json.dump(result, json_file, indent=4)
