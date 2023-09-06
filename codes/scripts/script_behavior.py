@@ -1,6 +1,4 @@
-# script for behavior analysis
-
-# %% imports
+# %% ===== imports =====
 
 import numpy as np
 import pandas as pd
@@ -13,7 +11,7 @@ from behavior.preprocessing import data_cleanup, format_onetargconf
 from behavior.descriptive import *
 
 
-# %% load data
+# %% ===== load data =====
 
 # at some point, just load pre-cleaned file here
 
@@ -28,7 +26,7 @@ bhv_df = data_cleanup(filename)
 bhv_df_noOneTarg = format_onetargconf(bhv_df, remove_one_targ=True)
 
 
-# %% PDW and Accuracy against RT quantiles
+# %% ===== PDW and Accuracy against RT quantiles ===== 
 
 by_conds = ['modality', 'coherence', 'heading']
 data_delta0 = bhv_df_noOneTarg.loc[bhv_df_noOneTarg['delta']==0, :]
@@ -36,7 +34,7 @@ data_delta0 = bhv_df_noOneTarg.loc[bhv_df_noOneTarg['delta']==0, :]
 RTquantiles(df=data_delta0, by_conds=by_conds, nq=5, depvar='PDW')
 
 
-# %% Psychometric and chronometric curves
+# %% ===== Psychometric and chronometric curves ===== 
 
 by_conds = ['modality', 'coherence', 'heading', 'delta']
 data_means = behavior_means(bhv_df_noOneTarg, by_conds=by_conds)
@@ -49,7 +47,7 @@ fit_results = gauss_fit_hdg(bhv_df_noOneTarg, p0=p0, y_vars=('choice','PDW', 'RT
 data_delta0 = data_means.loc[data_means['delta']==0, :]
 plot_behavior_hdg(data_delta0, fit_results, hue='modality', col='coherence')
 
-# %% Regression Analyses
+# %% ===== Regression Analyses ===== 
 
 formula = 'choice ~ heading + C(modality) + heading*C(modality)'
 fit_acc = smf.logit(formula, data=bhv_df_noOneTarg).fit()
