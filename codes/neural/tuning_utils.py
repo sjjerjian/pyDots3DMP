@@ -1,26 +1,105 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Apr 13 00:08:10 2023
-
-@author: stevenjerjian
-"""
-
-# compute tuning curves and signal correlations
-# tuning curve can be a property of neuron class eventually, a an aside
-
-import pdb
 import numpy as np
 import matplotlib.pyplot as plt
 
 # from scipy.stats import vonmises
 from scipy.optimize import curve_fit
 from scipy.special import i0
-from scipy.stats import f_oneway, kruskal
+from scipy.stats import f_oneway, kruskal, ttest_rel, ttest_1samp, wilcoxon
 
-from neural import condition_index
+from neural.rate_utils import condition_index
 
-# %% von Mises
+
+# %% simple tuning statistics
+
+def tuning_within(f_rates, condlist, cond_groups, 
+                  cond_cols=None, tuning_col='heading',
+                  parametric=True):
+    """
+    tuning within each time bin/interval (across conditions e.g. heading)
+    """
+
+    if parametric:
+        stat_func = f_oneway
+    else:
+        stat_func = kruskal
+
+    if cond_cols is None:
+        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
+
+    cg = cond_groups[cond_cols].drop_duplicates()
+    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+
+    # result is units x conditions x time
+    f_stat = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+    p_val = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+
+    for c in range(nC):
+        if np.sum(ic == c):
+            y = f_rates[:, ic == c, :]
+            x = np.squeeze(condlist.loc[ic == c, tuning_col].to_numpy())
+
+            y_grp = [y[:, x == g, :] for g in np.unique(x)]
+
+            f, p = stat_func(*y_grp, axis=1)
+            
+            p[np.isnan(p)] = 1
+
+            f_stat[:, c, :] = f
+            p_val[:, c, :] = p
+
+    return f_stat, p_val, cg
+
+
+def tuning_across(f_rates, condlist, cond_groups,
+                  cond_cols=None, tuning_col: str = 'heading', 
+                  bsln_t=0, abs_diff=True, parametric=True):
+    """
+    tuning at each time/interval, relative to a baseline time, across conditions
+    """
+    
+    if cond_cols is None:
+        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
+
+    cg = cond_groups[cond_cols].drop_duplicates()
+    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+
+    # result is units x conditions x time
+    stats = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+    p_val = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+
+    for c in range(nC):
+        if np.sum(ic == c):
+
+            y0 = f_rates[:, ic == c, bsln_t]
+            y = f_rates[:, ic == c, :]
+
+            if y0.ndim == 3:
+                y0 = np.mean(y0, axis=2) # average over bsln_t time period
+
+            for t in range(y.shape[2]):
+                yt = y[:, :, t]
+                if parametric:
+
+                    if abs_diff:
+                        stat, p = ttest_1samp(np.abs(yt-y0), 0, axis=1)
+                    else:
+                        stat, p = ttest_rel(y0, yt, axis=1)
+                else: 
+                    if abs_diff:
+                        stat, p = wilcoxon(np.abs(yt - y0), axis=1)
+                    else:
+                        stat, p = wilcoxon(yt, y0, axis=1)
+
+                p[np.isnan(p)] = 1
+
+                stats[:, c, t] = stat
+                p_val[:, c, t] = p
+
+
+    return stats, p_val, cg
+
+
+# %% von Mises tuning curve fits
 
 # TODO decorate these to allow variable function inputs
 
@@ -82,6 +161,8 @@ def fit_predict_vonMises(y, x, x_pred, k=1.5):
     return y_pred, popt, p0, perr
 
 
+# %% preferred heading calculations
+
 def delta_pref_hdg(func):
     def wrapper(y, x, axis=1):
         pref_hdg, pref_dir = func(y, x, axis)
@@ -110,30 +191,7 @@ def tuning_basic(y, x, axis=1):
     #pref_mag = (np.mean(yR, axis=axis) - np.mean(yL, axis=axis))
     #pref_dir = np.sign(pref_mag)
 
-    pref_dir = (np.mean(yR, axis=axis) >
-                np.mean(yL, axis=axis)).astype(int) + 1
+    pref_dir = (np.mean(yR, axis=axis) > np.mean(yL, axis=axis)).astype(int)
     
     return pref_hdg, pref_dir
 
-
-def tuning_sig(f_rates, condlist, cond_groups, cond_columns):
-
-    cg = cond_groups[cond_columns[:-1]].drop_duplicates()
-    ic, nC, cg = condition_index(condlist[cond_columns[:-1]], cg)
-
-    f_stat = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
-    p_val = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
-
-    for c in range(nC):
-        if np.sum(ic == c):
-            y = f_rates[:, ic == c, :]
-            x = np.squeeze(condlist.loc[ic == c, cond_columns[-1]].to_numpy())
-
-            y_grp = [y[:, x == g, :] for g in np.unique(x)]
-            f, p = f_oneway(*y_grp, axis=1)
-            #f, p = kruskal(*y_grp, axis=1)
-
-            f_stat[:, c, :] = f
-            p_val[:, c, :] = p
-
-    return f_stat, p_val, cg
