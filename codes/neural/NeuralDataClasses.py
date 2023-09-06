@@ -90,7 +90,6 @@ class ksUnit(Unit):
 
     # TODO add contam pct
 
-
     def raster_plot(self, align, condlist, col, hue, **kwargs):
         fig, ax = plot_raster(self.spiketimes, align, condlist, col, hue, **kwargs)
         return fig, ax
@@ -133,7 +132,6 @@ class Population:
 
     def popn_rel_event_times(self, align=['stimOn'], others=['stimOff']):
         self.rel_event_times = rel_event_times(self.events, align, others)
-        return self.rel_event_times
 
     def get_firing_rates(self, *args, **kwargs):
         return calc_firing_rates(self.units, self.events, *args, **kwargs)
@@ -193,8 +191,8 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
         if events.loc[good_trs, aev].isna().all(axis=0).any():
             raise ValueError(aev)
 
-        align_ev = events.loc[good_trs, aev].to_numpy(dtype='float64')
-        other_ev = events.loc[good_trs, oev].to_numpy(dtype='float64')
+        align_ev = events.loc[good_trs, aev].to_numpy(dtype='float64', na_value=np.nan)
+        other_ev = events.loc[good_trs, oev].to_numpy(dtype='float64', na_value=np.nan)
         reltimes[aev] = other_ev - align_ev[:, np.newaxis]
 
     return reltimes
