@@ -187,17 +187,16 @@ def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='cohe
     def _errbar_plot(x, y, yerr, **kwargs):
         plt.errorbar(x, y, yerr, **kwargs)
 
-    # plot the empirical data points
-        
+    # plot the empirical data points        
     g = sns.FacetGrid(data_obs, row=row, col=col, hue=hue,
                       palette=palette, sharey=False,
                       **fig_kwargs)
-    g.map(_errbar_plot, 'heading', 'mean', 'se',
+    g.map_dataframe(_errbar_plot, 'heading', 'mean', 'se',
             linestyle='', marker='.')
-
+    
     # overlay the fit data as a line
     for ax_key, ax in g.axes_dict.items():
-        ax_data = data_fit.loc[data_fit[col]==ax_key[1]]
+        ax_data = data_fit.loc[data_fit[col]==ax_key[1], :]
         sns.lineplot(data=ax_data, x='heading', y=ax_key[0],
                         hue=hue, ax=ax, palette=palette)
         
@@ -212,7 +211,10 @@ def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='cohe
         elif 'RT' in ax_key:
             ax.set_ylim([0.5, 1.2])
             ax.set_ylabel('mean RT (s)')    
-        ax.set_xticks(np.unique(data_obs['heading']))
+
+        xhdgs = np.unique(data_obs['heading'])
+        ax.set_xticks(xhdgs)
+        ax.set_xticklabels(xhdgs, rotation=40, ha='right')
     
     plt.show()
 
