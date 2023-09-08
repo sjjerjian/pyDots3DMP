@@ -16,36 +16,8 @@ from behavior.descriptive import *
 from pybads import BADS
 #from scipy.optimize import minimize
 
-# %% ===== generate (and save) simulated data =====
-
-sim_params = {'kmult': 0.15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
-                'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
-        
-mods = np.array([1, 2, 3])
-cohs = np.array([0.3, 0.7])
-hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
-deltas = np.array([-3, 0, 3])
-
-nreps = 200
-trial_table, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
-
-accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
-sim_data, _ = ddm_2d.generate_data(sim_params, data=trial_table, 
-                                         accumulator=accum, method='simulate', return_wager=True)
-
-# TODO, option to save save sim_data as csv
-with open(f"../data/sim_behavior_202308_{nreps}reps.pkl", "wb") as file:
-    pickle.dump((sim_data, sim_params), file, protocol=-1)
-
-
-# %% ===== load simulated data =====
-
-# nreps = 200
-# filename = f"../../data/sim_behavior_202308_{nreps}reps.pkl" # replace with real data
-# with open(f"../../data/sim_behavior_202308_{nreps}reps.pkl", "rb") as file:
-#     data, sim_params = pickle.load(file)
-
-# %% ===== load real monkey data =====
+# %% ----------------------------------------------------------------
+# ===== load data =====
 
 filename = "/Users/stevenjerjian/Desktop/FetschLab/PLDAPS_data/dataStructs/lucio_20220512-20230606.csv"
 
@@ -212,3 +184,39 @@ def result_to_json(result, json_filename):
 
     with open(json_filename, 'w') as json_file:
         json.dump(result, json_file, indent=4)
+
+
+
+
+"""
+
+# %% ===== generate (and save) simulated data =====
+
+sim_params = {'kmult': 0.15, 'bound': np.array([1, 1]), 'alpha': 0.05, 'theta': [0.8, 0.6, 0.7],
+                'ndt': [0.1, 0.3, 0.2], 'sigma_ndt': 0.06, 'sigma_dv': 1}
+        
+mods = np.array([1, 2, 3])
+cohs = np.array([0.3, 0.7])
+hdgs = np.array([-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12])
+deltas = np.array([-3, 0, 3])
+
+nreps = 200
+trial_table, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
+
+accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.005), grid_vec=np.arange(-3, 0, 0.025))
+sim_data, _ = ddm_2d.generate_data(sim_params, data=trial_table, 
+                                         accumulator=accum, method='simulate', return_wager=True)
+
+# TODO, option to save save sim_data as csv
+with open(f"../data/sim_behavior_202308_{nreps}reps.pkl", "wb") as file:
+    pickle.dump((sim_data, sim_params), file, protocol=-1)
+
+
+# %% ===== load simulated data =====
+
+nreps = 200
+filename = f"../../data/sim_behavior_202308_{nreps}reps.pkl" # replace with real data
+with open(f"../../data/sim_behavior_202308_{nreps}reps.pkl", "rb") as file:
+    data, sim_params = pickle.load(file)
+
+"""
