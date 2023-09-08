@@ -200,16 +200,18 @@ def generate_data(params: dict, data: pd.DataFrame(),
         for m, mod in enumerate(mods):
 
             if mod == 1:
-                abs_drifts = urg_ves * kves * sin_uhdgs
+                abs_drifts = urg_ves + kves * sin_uhdgs
 
             elif mod == 2:
-                abs_drifts = urg_vis * np.mean(kvis) * sin_uhdgs
+                abs_drifts = urg_vis + np.mean(kvis) * sin_uhdgs
 
             elif mod == 3:
-                abs_drifts = np.sqrt(urg_ves * kves ** 2 + urg_vis * np.mean(kvis) ** 2) * sin_uhdgs
+                abs_drifts = np.sqrt(urg_ves**2 + kves**2 + urg_vis**2 + np.mean(kvis)**22) * sin_uhdgs
+
+            drifts_list = [abs_drifts[:, i:i+1] for i in range(abs_drifts.shape[1])]
 
             # run the method of images dtb to extract pdfs, cdfs, and LPO
-            accumulator.set_drifts(list(abs_drifts), hdgs[hdgs >= 0])
+            accumulator.set_drifts(drifts_list, hdgs[hdgs >= 0])
             accumulator.dist(return_pdf=True).log_posterior_odds()
             log_odds_maps.append(accumulator.log_odds)
 
@@ -231,14 +233,14 @@ def generate_data(params: dict, data: pd.DataFrame(),
                 print(mod, coh, delta)
 
                 if mod == 1:
-                    drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))
+                    drifts = urg_ves + kves * np.sin(np.deg2rad(hdgs))
 
                     if method == 'simulate' or method == 'sim':
                         drifts *= accumulator.dt
                         sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
                 if mod == 2:
-                    drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs))
+                    drifts = urg_vis + kvis[c] * np.sin(np.deg2rad(hdgs))
 
                     if method == 'simulate' or method == 'sim':
                         drifts *= accumulator.dt
@@ -249,8 +251,8 @@ def generate_data(params: dict, data: pd.DataFrame(),
                     w_vis = np.sqrt(kvis[c] ** 2 / (kves ** 2 + kvis[c] ** 2))
 
                     # +ve delta means ves to the left, vis to the right
-                    drift_ves = urg_ves * kves * np.sin(np.deg2rad(hdgs - delta / 2))
-                    drift_vis = urg_ves * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
+                    drift_ves = urg_ves + kves * np.sin(np.deg2rad(hdgs - delta / 2))
+                    drift_vis = urg_vis + kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
                     if method == 'simulate' or method == 'sim':
                         drift_ves, drift_vis = drift_ves * accumulator.dt, drift_vis * accumulator.dt
@@ -262,9 +264,11 @@ def generate_data(params: dict, data: pd.DataFrame(),
                 if method == 'simulate' or method == 'sim':
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
-                start_time = time.time()
                 # calculate cdf and pdfs using signed drift rates now
-                accumulator.set_drifts(list(drifts), hdgs)
+
+                start_time = time.time()
+                drifts_list = [drifts[:, i:i+1] for i in range(drifts.shape[1])]
+                accumulator.set_drifts(drifts_list, hdgs)
                 accumulator.dist(return_pdf=return_wager)
                 end_time = time.time()
 
@@ -452,3 +456,32 @@ def _intersection_from_margconds(a_given_b, prob_a, prob_b):
 
     return prob_ab, b_given_a
 
+
+
+def get_stim_urg(tvec: np.ndarray = None, pos: np.ndarray = None, moment=1):
+
+    # define position vector, then diff to get vel/acc
+    # or provide position vector directly (e.g. nexonar sampled)
+    
+    dt = tvec[1] - tvec[0]
+
+    if pos is None:
+        ampl = 0.16  
+        pos = norm.cdf(tvec, tvec[int(np.round(len(tvec)/2))], 0.14) * ampl
+    
+    # dt normalization doesn't really matter if we're dividing by max anyway
+    vel = np.concatenate([[0], np.diff(pos)/dt]) # metres s^-1
+    acc = np.concatenate([[0], np.abs(np.diff(vel))]) # metres s^-2
+    
+    vel = np.cumsum(vel)
+    acc = np.cumsum(acc)
+
+    vel /= vel.max()
+    acc /= acc.max()
+    
+    if moment == 1 or moment == 'vel':
+        return vel        
+
+    elif moment == 2 or moment == 'acc':
+        return acc
+        

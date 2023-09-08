@@ -21,8 +21,8 @@ class AccumulatorModelMOI:
     drift_rates: list = field(default_factory=list)
     drift_labels: list = field(default_factory=list)
     sensitivity: float = field(default=1)
-    urgency: np.ndarray = field(default=0)
-    bound: np.ndarray = np.array([1, 1])  # TODO allow to be int, then duplicate
+    urgency: np.ndarray = field(default=None)
+    bound: np.ndarray = np.array([1, 1])  
     num_images: int = 7
 
     # TODO clean this up a bit, if we can?
@@ -36,27 +36,36 @@ class AccumulatorModelMOI:
     lo_lose_pdf: np.ndarray = np.array([])
     log_odds: np.ndarray = np.array([])
 
-    dt: int = field(init=False)
+    dt: float = field(init=False)
 
     def _scale_drift(self):
-        # if single drift values provided, add corresponding negated value for anti-correlated accumulator
+        # add corresponding negated value for anti-correlated accumulator
         # also update drift rates based on sensitivity and urgency, if provided
         for d, drift in enumerate(self.drift_rates):
             drift = drift * np.array([1, -1])
             self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
 
         return self
+    
+    def set_bound(self, bound):
+        
+        if isinstance(bound, (int, float)):
+            bound = np.array([bound, bound])
+        
+        assert len(bound) == 2, 'bound must be a single int/float, or a 2-element array'
+        self.bound = bound
+        
+        return self
 
     def __post_init__(self):
 
-        self.dt = np.diff(self.tvec[:2])
-
-        if isinstance(self.bound, (int, float)):
-            self.bound = np.array([self.bound, self.bound])
+        self.dt = self.tvec[1] - self.tvec[0]
+        self.set_bound(self.bound) # in case bound is given as single int/float
 
         if len(self.drift_labels) == 0:
              self.drift_labels = np.arange(len(self.drift_rates))
         self._scale_drift()
+
 
     def set_drifts(self, drifts: list, labels=None):
         self.drift_rates = drifts
@@ -365,25 +374,20 @@ def moi_dv(mu, s=np.array([1, 1]), num_images: int = 7):
     return dv
 
 
-def urgency_scaling(mu, tvec, urg):
-    """
-    :param mu:
-    :param tvec:
-    :param urg:
-    :return:
-    """
+def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
 
-    # no urgency, just tile mu for compatibility
-    if urg == 0:
-        mu = np.tile(mu, (len(tvec), 1))
+    if len(mu) != len(tvec):
+            mu = np.tile(mu, (len(tvec), 1))
 
-    elif isinstance(urg, (int, float)) or (len(urg) == 1):
-        urg_vec = np.ones(len(tvec)-1) * urg/(len(tvec)-1)
-        urg_vec = np.insert(urg_vec, 0, 0)
-        mu = mu * urg_vec
-    else: # assume vector like tvec
-        assert len(urg) == len(tvec), "If urgency signal is a vector, it must match tvec"
-        mu = mu * urg
+    if urg is not None:
+        if isinstance(urg, (int, float)):
+            urg = np.ones(len(tvec)-1) * urg/(len(tvec)-1)
+            urg = np.insert(urg, 0, 0)
+    
+        assert len(urg) == len(tvec) == len(mu),\
+            "If urgency signal is a vector, it must match tvec and drift vector lengths"
+        
+        mu = mu + urg.reshape(-1, 1)
 
     return mu
 
