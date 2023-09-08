@@ -107,13 +107,13 @@ bads_result_wpdw = bads_wpdw.optimize()
 # %% ----------------------------------------------------------------
 # now take the fitted parameters, and generate model predictions
 
-# fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
-# fitted_params['sigma_ndt'] = init_params['sigma_ndt']
+fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
+fitted_params['sigma_ndt'] = init_params['sigma_ndt']
 
-fitted_params = {
-    'kmult': [0.2, 0.388, 0.1], 'bound': 0.8,
-    'ndt': [0.35, 0.4, 0.4], 'sigma_ndt': 0.05,
-    }
+# fitted_params = {
+#     'kmult': [0.2, 0.388, 0.1], 'bound': 0.8,
+#     'ndt': [0.35, 0.4, 0.4], 'sigma_ndt': 0.05,
+#     }
 
 # generate conditions list for prediction
 
