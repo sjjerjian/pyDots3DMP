@@ -4,3 +4,7 @@
 *.pkl
 */pydots3DMP.egg-info/*
 *.pyc
+
+results/
+
+data/
