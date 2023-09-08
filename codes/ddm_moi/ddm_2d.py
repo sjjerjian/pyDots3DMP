@@ -49,8 +49,8 @@ def optim_decorator(loss_func):
             print(params_dict)
             raise ValueError("loss function evaluated to infinite")
 
-
         # if all parameters are fixed, we're not trying to fit, we just want the model predictions
+        # probably unneccesary, if you just want the model predicts then call generate_data directly
         if (fixed==1).all():
             return loss_val, llhs, model_data
         else:
@@ -136,6 +136,8 @@ def objective(params: dict, data: pd.DataFrame,
 
     # RT likelihood straight from dataframe
     model_llh['RT'] = np.log(model_data['RT']).sum()
+
+    print(model_llh)
 
     # sum the individual log likelihoods, if included in outputs, and after scaling them according to llh_scaling
     neg_llh = -np.sum(np.array([model_llh[v]*w for v, w in zip(outputs, llh_scaling) if v in model_llh]))

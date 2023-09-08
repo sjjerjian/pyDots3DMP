@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import pickle
+import json
 
 from ddm_moi.Accumulator import AccumulatorModelMOI
 from ddm_moi import ddm_2d
@@ -72,16 +73,14 @@ bads_result = bads.optimize()
 # min_result = minimize(ddm_2d.objective, init_params_array, method='Nelder-Mead',
 #                args=args_tuple, options=fit_options)
 
+# %% ----------------------------------------------------------------
+# re-run optimization, but now with PDW
+# set tighter bounds on already fitted parameters
+# set novel starting point and bounds for theta and alpha (PDW parameters)
 
-# TODO make a simple loop to re-run with multiple starting points?
-
-# %% ===== re-run optimization, but now with PDW =====
-# rerun (with tight bounds on all already fitted parameters, except alpha and theta)
-
-x = np.array([0.50296439, 0.6763085, 0.67342862, 0.3947464 , 0.5, 0.45350879, 0.06])
 
 init_params2 = ddm_2d.set_params_dict_from_array(x, init_params)
-init_params2['sigma_ndt'] = 0.06
+init_params2['sigma_ndt'] = init_params['sigma_ndt']  # fix back at original
 init_params2['theta'] = [0.4, 0.3, 0.4]
 init_params2['alpha'] = 0.05
 init_params_array = ddm_2d.get_params_array_from_dict(init_params2)

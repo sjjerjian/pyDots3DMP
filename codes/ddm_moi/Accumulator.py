@@ -13,6 +13,7 @@ class AccumulatorModelMOI:
     Initialized with certain parameters, then can calculate pdf, logoddsmap, cdf etc, using class methods
 
     # TODO clean up documentation
+    # TODO allow to get cdf or pdf
 
     """
 
@@ -76,6 +77,7 @@ class AccumulatorModelMOI:
 
         return self
 
+
     def pdf(self, return_marginals=True, return_mesh=True):
 
         # TODO allow flexible specification of grid_vec, to use mgrid
@@ -100,11 +102,11 @@ class AccumulatorModelMOI:
                 marg_lo.append(pdf_3d[:, -1, :])  # top bound
 
                 # I think this is right, pdf of losing accumulator summed across all values of dv
-                up_pdf = np.sum(pdf_3d[:, :, -1], axis=1)
-                lo_pdf = np.sum(pdf_3d[:, -1, :], axis=1)
+                # up_pdf = np.sum(pdf_3d[:, :, -1], axis=1)
+                # lo_pdf = np.sum(pdf_3d[:, -1, :], axis=1)
 
-                up_cdf = np.cumsum(up_pdf)
-                lo_cdf = np.cumsum(lo_pdf)
+                # up_cdf = np.cumsum(up_pdf)
+                # lo_cdf = np.cumsum(lo_pdf)
 
         if return_marginals is False:
             self.pdf3D = np.stack(pdfs, axis=0)
