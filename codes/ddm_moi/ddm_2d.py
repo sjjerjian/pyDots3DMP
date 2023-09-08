@@ -173,13 +173,22 @@ def generate_data(params: dict, data: pd.DataFrame(),
 
     model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
     model_data[['choice', 'PDW', 'RT']] = np.nan
+    
+    if isinstance(params['kmult'], (int, float)):
+        kmult, kstim = np.repeat(params['kmult'], 2), np.array([1, 1])
+    elif len(params['kmult']) == 2:
+        kmult, kstim = np.repeat(params['kmult'][0], 2), np.repeat(params['kmult'][1], 2)
+    elif len(params['kmult']) == 3:
+        kmult, kstim = params['kmult'][0:2], np.repeat(params['kmult'][2], 2)
+    elif len(params['kmult']) == 4:
+        kmult, kstim = params['kmult'][0:2], params['kmult'][2:3]
 
-    # this is a placeholder, eventually should be acc, vel
-    urg_ves, urg_vis = 1, 1
-
-    kvis = params['kmult'] * cohs.T * 100  # scale the parameter up
-    kves = np.mean(kvis)  # for now, this means vis and ves do end up with the same log odds map
-    accumulator.bound = params['bound']
+    urg_ves = kstim[0] * get_stim_urg(tvec=accumulator.tvec, moment='acc').reshape(-1, 1)
+    urg_vis = kstim[1] * get_stim_urg(tvec=accumulator.tvec, moment='vel').reshape(-1, 1)
+    
+    kvis = kmult[1] * cohs.T * 100
+    kves = kmult[0] * 100 
+    accumulator.set_bound(params['bound'])
 
     # ====== generate pdfs and log_odds for confidence
     # loop over modalities. marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
