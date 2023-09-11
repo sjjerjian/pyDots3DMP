@@ -11,13 +11,17 @@ from neural.rate_utils import condition_index
 
 # %% simple tuning statistics
 
-def tuning_within(f_rates, condlist, cond_groups, 
-                  cond_cols=None, tuning_col='heading',
+def tuning_within(f_rates: np.ndarray, condlist, cond_groups=None, 
+                  cond_cols=None, tuning_col: str = 'heading',
                   parametric=True):
     """
     tuning within each time bin/interval (across conditions e.g. heading)
     """
 
+    # this could be a little circular, since we call condition_index again below
+    if cond_groups is None:
+        _, _, cond_groups = condition_index(condlist)
+    
     if parametric:
         stat_func = f_oneway
     else:
@@ -50,12 +54,15 @@ def tuning_within(f_rates, condlist, cond_groups,
     return f_stat, p_val, cg
 
 
-def tuning_across(f_rates, condlist, cond_groups,
+def tuning_across(f_rates: np.ndarray, condlist, cond_groups=None,
                   cond_cols=None, tuning_col: str = 'heading', 
                   bsln_t=0, abs_diff=True, parametric=True):
     """
     tuning at each time/interval, relative to a baseline time, across conditions
     """
+    
+    if cond_groups is None:
+        _, _, cond_groups = condition_index(condlist)
     
     if cond_cols is None:
         cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
