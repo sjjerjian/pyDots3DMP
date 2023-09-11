@@ -1,4 +1,4 @@
-# %% ========================
+# %% ----------------------------------------------------------------
 # imports 
 
 import numpy as np
@@ -10,7 +10,7 @@ from behavior.preprocessing import dots3DMP_create_trial_list, add_trial_outcome
 from neural.rate_utils import build_pseudopop, concat_aligned_rates
 from neural.tuning_utils import *
 
-# %% ========================
+# %% ----------------------------------------------------------------
 # load data 
 
 data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data'
@@ -23,7 +23,7 @@ with open(filename, 'rb') as file:
 pars = ['Tuning', 'Task']
 data = data.loc[data[pars].notna().all(axis=1) & data['is_good']]
 
-# %% ========================
+# %% ----------------------------------------------------------------
 # define conditions of interest 
 
 # these are the same for tuning and task
@@ -38,22 +38,22 @@ hdgs_task = [-12, -6, -3, -1.5, 0, 1.5, 3, 6, 12]
 
 # TODO for some sessions headings were different, right now this just ignores those trials
 
-tr_tab_tuning, _ = dots3DMP_create_trial_list(hdgs_tuning, mods, cohs, deltas, 1, shuff=False)
+tr_tab_tuning = dots3DMP_create_trial_list(hdgs_tuning, mods, cohs, deltas, 1, shuff=False)
 tr_tab_tuning.columns = cond_labels  # should use .rename here to make sure ordering is correct?
 
-tr_tab_task, _ = dots3DMP_create_trial_list(hdgs_task, mods, cohs, deltas, 1, shuff=False)
+tr_tab_task = dots3DMP_create_trial_list(hdgs_task, mods, cohs, deltas, 1, shuff=False)
 tr_tab_task.columns = cond_labels  
 
 # %% ========================
 # Create tuning pseudopopulation 
 
-t_params = {'align_ev': [['stimOn', 'stimOff'], 'fpOn'], 
-            'trange': np.array([[0.5, -0.5], [0, 0.5]]), 
-            'binsize': 0}
+# t_params = {'align_ev': [['stimOn', 'stimOff'], 'fpOn'], 
+#             'trange': np.array([[0.5, -0.5], [0, 0.5]]), 
+#             'binsize': 0}
 
-tuning_pseudopop = build_pseudopop(popn_dfs=data['Tuning'], tr_tab=tr_tab_tuning, 
-                                   t_params=t_params, return_averaged=True,
-)
+# tuning_pseudopop = build_pseudopop(popn_dfs=data['Tuning'], tr_tab=tr_tab_tuning, 
+#                                    t_params=t_params, return_averaged=True,
+# )
 
 # %% ========================
 # Calculating tuning significance (across headings and across baseline/stimulus)
@@ -92,6 +92,12 @@ tuning_conds = tuning_res_across['unique_conds'][0]
 pvals_across = np.vstack(tuning_res_across['pvals'])
 pvals_within = np.vstack(tuning_res_within['pvals'])
 
+# %% ----------------------------------------------------------------
+
+# for each unit, take single trial firing rates, then  for eachcondition do roc analysis across binary split by another var (choice, PDW)
+
+
+# %% ----------------------------------------------------------------
 area = np.array(tuning_pseudopop.area)
 print(f"MSTd n={np.sum(area=='MSTd')}, PIVC n={np.sum(area=='PIVC')}")
 MSTsu = np.sum((area=='MSTd') & (tuning_pseudopop.clus_group==2))
@@ -100,13 +106,13 @@ PIVCsu = np.sum((area=='PIVC') & (tuning_pseudopop.clus_group==2))
 print(f"MSTd n={MSTsu}, PIVC n={PIVCsu}")
 
 
-np.array([(p=='MSTd') and not low and u==2 for p, low, u in zip(pseudo_pop.area, lf, pseudo_pop.clus_group)]).sum()
-np.array([(p=='PIVC') and not low and u==2 for p, low, u in zip(pseudo_pop.area, lf, pseudo_pop.clus_group)]).sum()
+# np.array([(p=='MSTd') and not low and u==2 for p, low, u in zip(pseudo_pop.area, lf, pseudo_pop.clus_group)]).sum()
+# np.array([(p=='PIVC') and not low and u==2 for p, low, u in zip(pseudo_pop.area, lf, pseudo_pop.clus_group)]).sum()
 
 
 
-# %% ========================
-# # ===== Create task pseudopopulation (time-resolved) =====
+# %% ----------------------------------------------------------------
+# # ===== Create task  pseudopopulation (time-resolved) =====
 
 t_params = {'align_ev': ['stimOn', 'saccOnset'],
             'trange': np.array([[-1.5, 1.3], [-0.5, 1.5]]), 
@@ -117,8 +123,8 @@ sm_params = {'type': 'gaussian',
              'binsize': t_params['binsize'],
              'width': 0.4, 'sigma': 0.05}
 
-task_pseudopop = build_pseudopop(popn_dfs=data['Task'], tr_tab=tr_tab_task,
-    t_params=t_params, smooth_params=sm_params, return_averaged=True)
+# task_pseudopop = build_pseudopop(popn_dfs=data['Task'], tr_tab=tr_tab_task,
+#     t_params=t_params, smooth_params=sm_params, return_averaged=True)
 
 
 # %% ========================
