@@ -5,6 +5,8 @@
 */pydots3DMP.egg-info/*
 *.pyc
 
+codes/pydots3DMP.egg-info/
+
 results/
 
 data/
