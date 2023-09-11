@@ -9,6 +9,7 @@ import matplotlib as mpl
 
 from scipy.ndimage import convolve1d
 from scipy.signal import gaussian
+from sklearn.metrics import roc_auc_score, roc_curve, auc
 
 from typing import Union
 from neural.NeuralDataClasses import PseudoPop
@@ -104,6 +105,56 @@ def condition_averages(f_rates, condlist, cond_groups=None) -> tuple[np.ndarray,
                                        axis=1) / np.sqrt(np.sum(ic == c))
 
     return cond_fr, cond_sem, cond_groups
+
+
+def outcome_prob(f_rates: np.ndarray,
+                 condlist, 
+                 cond_groups=None, cond_cols=None, outcome_col='choice') -> np.ndarray:
+    
+    if cond_cols is None:
+        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(outcome_col)]
+        
+    cg = cond_groups[cond_cols].drop_duplicates()
+    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+
+    # result is units x conditions x time
+    out_prob = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+    
+    for c in range(nC):
+        if np.sum(ic == c):
+            y_inds = condlist.loc[ic==c, outcome_col] - 1
+            
+            try:
+                for u in range(f_rates.shape[0]):
+                    for t in range(f_rates.shape[2]):
+                        fr = f_rates[u, ic==c, t]
+                        nan_idx = np.isnan(fr)
+                        if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1:
+                            continue
+                        out_prob[u, c, t] = roc_auc_score(y_inds[~nan_idx], fr[~nan_idx])
+            except ValueError:
+                print(u, t)
+
+    return out_prob, cg
+
+
+def roc_auc_threshold(firing_rates, labels, num_points=100):
+
+    linspace_rates = np.linspace(np.min(f_rates), np.min(f_rates), num_points)
+    
+    # Initialize arrays to store false positive rates (FPR) and true positive rates (TPR)
+    fpr = np.zeros(num_points)
+    tpr = np.zeros(num_points)
+    
+    for i, threshold in enumerate(linspace_rates):
+        # Calculate the ROC curve for the current threshold
+        fpr[i], tpr[i], _ = roc_curve(labels, (f_rates >= threshold).astype(int))
+    
+    # Calculate the ROC AUC using the trapezoidal rule
+    roc_auc = auc(fpr, tpr)
+    
+    return fpr, tpr, roc_auc
+
 
 
 def build_pseudopop(popn_dfs, tr_tab, 
