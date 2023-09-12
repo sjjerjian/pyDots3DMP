@@ -179,6 +179,7 @@ class AccumulatorModelMOI:
                 cbar = fig_pdf.colorbar(contour, ax=axp[2])
             fig_pdf.tight_layout()
 
+        return fig_cdf, fig_pdf
 
 # ============
 # functions
