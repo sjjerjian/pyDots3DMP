@@ -52,6 +52,8 @@ class AccumulatorModelMOI:
         
         if isinstance(bound, (int, float)):
             bound = np.array([bound, bound])
+        elif isinstance(bound, list):
+            bound = np.array(bound)
         
         assert len(bound) == 2, 'bound must be a single int/float, or a 2-element array'
         self.bound = bound
