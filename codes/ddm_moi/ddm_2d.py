@@ -117,11 +117,11 @@ def objective(params: dict, data: pd.DataFrame,
         llh_scaling = [1, 1, 1]
 
     # only calculate pdfs if fitting confidence variable
-    return_pdf = 'PDW' in outputs
+    return_wager = 'PDW' in outputs
 
     # get model predictions (probabilistic) given parameters and trial conditions in data
     model_data, _ = generate_data(params=params, data=data, accumulator=accumulator,
-                                  method='prob', return_wager=return_pdf)
+                                  method='prob', return_wager=return_wager)
 
     # calculate log likelihoods of parameters, given observed data
 
@@ -130,14 +130,12 @@ def objective(params: dict, data: pd.DataFrame,
     # choice and PDW likelihoods according to bernoulli probability
     model_llh['choice'] = np.sum(np.log(model_data.loc[data['choice'] == 1, 'choice'])) + \
                            np.sum(np.log((1 - model_data.loc[data['choice'] == 0, 'choice'])))
-    if return_pdf:
+    if return_wager:
         model_llh['PDW'] = np.sum(np.log(model_data.loc[data['PDW'] == 1, 'PDW'])) + \
                             np.sum(np.log(1 - model_data.loc[data['PDW'] == 0, 'PDW']))
 
     # RT likelihood straight from dataframe
     model_llh['RT'] = np.log(model_data['RT']).sum()
-
-    print(model_llh)
 
     # sum the individual log likelihoods, if included in outputs, and after scaling them according to llh_scaling
     neg_llh = -np.sum(np.array([model_llh[v]*w for v, w in zip(outputs, llh_scaling) if v in model_llh]))
@@ -237,14 +235,14 @@ def generate_data(params: dict, data: pd.DataFrame(),
                 if mod == 1:
                     drifts = urg_ves + kves * np.sin(np.deg2rad(hdgs))
 
-                    if method == 'simulate' or method == 'sim':
+                    if method[:3] == 'sim':
                         drifts *= accumulator.dt
                         sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
                 if mod == 2:
                     drifts = urg_vis + kvis[c] * np.sin(np.deg2rad(hdgs))
 
-                    if method == 'simulate' or method == 'sim':
+                    if method[:3] == 'sim':
                         drifts *= accumulator.dt
                         sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
 
@@ -256,25 +254,31 @@ def generate_data(params: dict, data: pd.DataFrame(),
                     drift_ves = urg_ves + kves * np.sin(np.deg2rad(hdgs - delta / 2))
                     drift_vis = urg_vis + kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
-                    if method == 'simulate' or method == 'sim':
+                    if method[:3] == 'sim':
                         drift_ves, drift_vis = drift_ves * accumulator.dt, drift_vis * accumulator.dt
                         sigma_dv = np.sqrt(w_ves ** 2 * params['sigma_dv'] ** 2 + w_vis ** 2 * params['sigma_dv'] ** 2)
                         sigma_dv = sigma_dv * np.sqrt(accumulator.dt)
 
                     drifts = w_ves * drift_ves + w_vis * drift_vis
 
-                if method == 'simulate' or method == 'sim':
+                if method[:3] == 'sim':
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
                 # calculate cdf and pdfs using signed drift rates now
 
-                start_time = time.time()
-                drifts_list = [drifts[:, i:i+1] for i in range(drifts.shape[1])]
+                if drifts.ndim == 2:
+                    drifts_list = [drifts[:, i:i+1] for i in range(drifts.shape[1])]
+                else:
+                    drifts_list = drifts.tolist()
+                    
                 accumulator.set_drifts(drifts_list, hdgs)
-                accumulator.dist(return_pdf=return_wager)
-                end_time = time.time()
 
-                print(f"Time to run accum dist: {(end_time-start_time):.2f}s\n")
+                # don't need to run this is simulating dv!
+                if method[:3] != 'sim':
+                    start_time = time.time()
+                    accumulator.dist(return_pdf=return_wager)
+                    end_time = time.time()
+                    print(f"Time to run accum dist: {(end_time-start_time):.2f}s\n")
 
                 for h, hdg in enumerate(hdgs):
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
@@ -373,7 +377,7 @@ def generate_data(params: dict, data: pd.DataFrame(),
                                 model_data.loc[trial_index, 'PDW'] = p_wager[0]
 
                         # ====== CHOICE ======
-                        if method == 'sample' or method == 'samp':
+                        if method[:4] == 'samp':
                             model_data.loc[trial_index, 'choice'] = \
                                 np.random.choice([1, 0], trial_index.sum(), replace=True, p=p_choice)
                         else:
@@ -392,7 +396,7 @@ def generate_data(params: dict, data: pd.DataFrame(),
                         #   sample from distribution (generating fake RTs) if method == 'sample'
                         #   or store probability of observed RTs, if method == 'probability'
 
-                        if method == 'sample' or method == 'samp':
+                        if method[:4] == 'samp':
                             model_data.loc[trial_index, 'RT'] = \
                                 np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
                         else:
@@ -401,14 +405,14 @@ def generate_data(params: dict, data: pd.DataFrame(),
                                 dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
                                 model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
                             else:
-                                # check that data doesn't contain RT column
+                                # check that data doesn't contain RT column?
                                 if rt_method == 'mean':
                                     model_data.loc[trial_index, 'RT'] = (accumulator.tvec * rt_dist).sum() # expected value
                                 elif rt_method == 'max':
                                     model_data.loc[trial_index, 'RT'] = accumulator.tvec[np.argmax(rt_dist)]
 
     # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
-    if method == 'probability' or method == 'prob':
+    if method[:4] == 'prob':
 
         model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=0, value=1e-10)
         model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=1, value=1 - 1e-10)
