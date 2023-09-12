@@ -3,7 +3,7 @@ import pandas as pd
 import time
 
 from scipy.signal import convolve
-from scipy.stats import norm, truncnorm
+from scipy.stats import norm, truncnorm, skewnorm
 from collections import OrderedDict
 
 from ddm_moi.Accumulator import AccumulatorModelMOI
@@ -224,6 +224,10 @@ def generate_data(params: dict, data: pd.DataFrame(),
     print('generating model results')
     # now to generate model results, loop over all conditions
     for m, mod in enumerate(mods):
+        
+        ndt_min = params['ndt'][m] / 2
+        ndt_max = params['ndt'][m] + ndt_min
+        
         for c, coh in enumerate(cohs):
             for d, delta in enumerate(deltas):
 
@@ -287,10 +291,10 @@ def generate_data(params: dict, data: pd.DataFrame(),
                     if trial_index.sum() == 0:
                         continue
 
-                    if method == 'simulate' or method == 'sim':
+                    if method[:3] == 'sim':
                         these_trials = np.where(trial_index)[0]
 
-                        non_dec_time = truncnorm.rvs(-2, 2, loc=params['ndt'][m], scale=params['sigma_ndt'],
+                        non_dec_time = truncnorm.rvs(ndt_min, ndt_max, loc=params['ndt'][m], scale=params['sigma_ndt'],
                                                      size=trial_index.sum())
 
                         for tr in range(trial_index.sum()):
@@ -473,14 +477,19 @@ def get_stim_urg(tvec: np.ndarray = None, pos: np.ndarray = None, moment=1):
 
     if pos is None:
         ampl = 0.16  
-        pos = norm.cdf(tvec, tvec[int(np.round(len(tvec)/2))], 0.14) * ampl
-    
+        # pos = norm.cdf(tvec, 0.9, 0.3) * ampl
+        pos = skewnorm.cdf(tvec, 2, 0.8, 0.4) * ampl # emulate tf
+
     # dt normalization doesn't really matter if we're dividing by max anyway
-    vel = np.concatenate([[0], np.diff(pos)/dt]) # metres s^-1
-    acc = np.concatenate([[0], np.abs(np.diff(vel))]) # metres s^-2
+    # vel = np.concatenate([[0], np.diff(pos)/dt]) # metres s^-1
+    # acc = np.concatenate([[0], np.abs(np.diff(vel))]) # metres s^-2
     
-    vel = np.cumsum(vel)
-    acc = np.cumsum(acc)
+    vel = np.gradient(pos)
+    acc = np.gradient(vel)
+    acc = np.abs(acc)
+    
+    # vel = np.cumsum(vel)
+    # acc = np.cumsum(acc)
 
     vel /= vel.max()
     acc /= acc.max()
