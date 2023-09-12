@@ -198,7 +198,7 @@ def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='cohe
     for ax_key, ax in g.axes_dict.items():
         ax_data = data_fit.loc[data_fit[col]==ax_key[1], :]
         sns.lineplot(data=ax_data, x='heading', y=ax_key[0],
-                        hue=hue, ax=ax, palette=palette)
+                        hue=hue, ax=ax, palette=palette, legend=False)
         
         ax.set_title("")
         if 'choice' in ax_key:
@@ -209,15 +209,16 @@ def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='cohe
             ax.set_ylim([0, 1])
             ax.set_ylabel('prop. high')
         elif 'RT' in ax_key:
-            ax.set_ylim([0.5, 1.2])
+            # ax.set_ylim([0.5, 1.2])
             ax.set_ylabel('mean RT (s)')    
 
         xhdgs = np.unique(data_obs['heading'])
         ax.set_xticks(xhdgs)
         ax.set_xticklabels(xhdgs, rotation=40, ha='right')
     
+    # TODO add legend back in
     plt.show()
-
+    
     return g   
 
 # %%
