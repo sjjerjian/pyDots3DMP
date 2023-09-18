@@ -161,7 +161,6 @@ def generate_data(params: dict, data: pd.DataFrame(),
     :return:
     """
 
-    # TODO urgency and ves/vis scaling
     # TODO add wager_method options: 'log_odds', 'time', 'evidence'
     # TODO add cue weighting options: 'optimal', 'random', 'fixed'
     # TODO unit tests
@@ -174,56 +173,91 @@ def generate_data(params: dict, data: pd.DataFrame(),
     model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
     model_data[['choice', 'PDW', 'RT']] = np.nan
     
-    if isinstance(params['kmult'], (int, float)):
-        kmult, kstim = np.repeat(params['kmult'], 2), np.array([1, 1])
-    elif len(params['kmult']) == 2:
-        kmult, kstim = np.repeat(params['kmult'][0], 2), np.repeat(params['kmult'][1], 2)
-    elif len(params['kmult']) == 3:
-        kmult, kstim = params['kmult'][0:2], np.repeat(params['kmult'][2], 2)
-    elif len(params['kmult']) == 4:
-        kmult, kstim = params['kmult'][0:2], params['kmult'][2:3]
-
-    urg_ves = kstim[0] * get_stim_urg(tvec=accumulator.tvec, moment='acc').reshape(-1, 1)
-    urg_vis = kstim[1] * get_stim_urg(tvec=accumulator.tvec, moment='vel').reshape(-1, 1)
+    # process some inputs
     
-    kvis = kmult[1] * cohs.T * 100
-    kves = kmult[0] * 100 
+    orig_tvec = accumulator.tvec
+    orig_dt = np.unique(accumulator.dt)
+
     accumulator.set_bound(params['bound'])
+    
+    if not stim_scaling:
+        b_ves, b_vis = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
+        a_t, v_t = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
+    else:  
+        b_ves = get_stim_urg(tvec=accumulator.tvec, moment='acc')
+        b_vis = get_stim_urg(tvec=accumulator.tvec, moment='vel')
+        a_t = np.cumsum((b_ves**2)/(b_ves**2).sum()).reshape(-1, 1)
+        v_t = np.cumsum((b_vis**2)/(b_vis**2).sum()).reshape(-1, 1)
+        
+        # a_t = a_t/a_t.sum() * len(accumulator.tvec)
+        # v_t = v_t/v_t.sum() * len(accumulator.tvec)
+    
+    # scale up by 100 - downweighted the input parameter to try to keep parameters the same order of magnitude
+    params['kmult'] *= 1000
+    
+    if isinstance(params['kmult'], (int, float)) or len(params['kmult']) == 1:
+        kvis = params['kmult'] * cohs.T
+        kves = np.mean(kvis)
+    else:
+        kves = params['kmult'][0]
+        kvis = params['kmult'][1] * cohs.T
 
     # ====== generate pdfs and log_odds for confidence
-    # loop over modalities. marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
+    # loop over modalities. 
+    # marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
+    # sensitivity is determined not just be k (internal sensivitity) but also b (external sensivitity)
+    # i.e. time-dependent stimulus reliability
 
     log_odds_maps = []
     if return_wager:
         sin_uhdgs = np.sin(np.deg2rad(hdgs[hdgs >= 0]))
 
         for m, mod in enumerate(mods):
+            
+            if len(accumulator.bound) == 3:
+                accumulator.set_bound(params['bound'][m])
 
             if mod == 1:
-                abs_drifts = urg_ves + kves * sin_uhdgs
-
+                # Drugo 2014 supplementary 1 Eq 7 (b(t) is inside the momentary evidence term so we square)
+                abs_drifts = a_t * kves * sin_uhdgs
+                accumulator.set_time(a_t.squeeze() * orig_tvec[-1])
+                
             elif mod == 2:
-                abs_drifts = urg_vis + np.mean(kvis) * sin_uhdgs
+                abs_drifts = v_t * np.mean(kvis) * sin_uhdgs
+                accumulator.set_time(v_t.squeeze() * orig_tvec[-1])
 
             elif mod == 3:
-                abs_drifts = np.sqrt(urg_ves**2 + kves**2 + urg_vis**2 + np.mean(kvis)**22) * sin_uhdgs
+                k_comb2 = a_t * kves**2 + v_t * np.mean(kvis)**2
+                abs_drifts = np.sqrt(k_comb2) * sin_uhdgs
+    
+                # Eq 14
+                t_comb = ((b_ves*kves)**2 / k_comb2) * a_t.squeeze() + ((b_vis*np.mean(kvis))**2 / k_comb2) * v_t.squeeze()
+                accumulator.set_time(t_comb/t_comb.max() * orig_tvec[-1])
 
-            drifts_list = [abs_drifts[:, i:i+1] for i in range(abs_drifts.shape[1])]
-
+            if abs_drifts.ndim == 2:
+                drifts_list = [abs_drifts[:, i:i+1] for i in range(abs_drifts.shape[1])]
+            else:
+                drifts_list = abs_drifts.tolist()
+                
             # run the method of images dtb to extract pdfs, cdfs, and LPO
             accumulator.set_drifts(drifts_list, hdgs[hdgs >= 0])
             accumulator.dist(return_pdf=True).log_posterior_odds()
             log_odds_maps.append(accumulator.log_odds)
 
-            # TODO this is where we would enforce different confidence mappings - simply by reassigning log_odds_maps / log_odds_above_threshold
+            # TODO this is where we would enforce different confidence mappings
+            # simply by reassigning log_odds_maps / log_odds_above_threshold
             # if confidence is purely time dependent, then we would set a log odds threshold map that is all ones to the left of threshold, and zeros to the right
             # if purely evidence dependent, then set it based on grid_vec, 1 below, zero above
 
         log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
 
-    print('generating model results')
+
     # now to generate model results, loop over all conditions
+    print('generating model results')
     for m, mod in enumerate(mods):
+        
+        if len(accumulator.bound) == 3:
+                accumulator.set_bound(params['bound'][m])
         
         ndt_min = params['ndt'][m] / 2
         ndt_max = params['ndt'][m] + ndt_min
@@ -237,35 +271,35 @@ def generate_data(params: dict, data: pd.DataFrame(),
                 print(mod, coh, delta)
 
                 if mod == 1:
-                    drifts = urg_ves + kves * np.sin(np.deg2rad(hdgs))
-
-                    if method[:3] == 'sim':
-                        drifts *= accumulator.dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
+                    drifts = a_t * kves * np.sin(np.deg2rad(hdgs))
+                    accumulator.set_time(a_t.squeeze() * orig_tvec[-1])
 
                 if mod == 2:
-                    drifts = urg_vis + kvis[c] * np.sin(np.deg2rad(hdgs))
-
-                    if method[:3] == 'sim':
-                        drifts *= accumulator.dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
+                    drifts = v_t * kvis[c] * np.sin(np.deg2rad(hdgs))
+                    accumulator.set_time(v_t.squeeze() * orig_tvec[-1])
 
                 elif mod == 3:
-                    w_ves = np.sqrt(kves ** 2 / (kves ** 2 + kvis[c] ** 2))
-                    w_vis = np.sqrt(kvis[c] ** 2 / (kves ** 2 + kvis[c] ** 2))
+                    
+                    kves2, kvis2 = (b_ves*kves)**2, (b_vis*kvis[c])**2 
+                    k_comb2 = kves2 + (b_vis*np.mean(kvis))**2
+        
+                    # Eq 14
+                    t_comb = ((b_ves*kves)**2 / k_comb2) * a_t.squeeze() + ((b_vis*np.mean(kvis))**2 / k_comb2) * v_t.squeeze()
+                    accumulator.set_time(t_comb/t_comb.max() * orig_tvec[-1])
+                
+                    w_ves = np.sqrt(kves2 / k_comb2)
+                    w_vis = np.sqrt(kvis2 / k_comb2)
 
                     # +ve delta means ves to the left, vis to the right
-                    drift_ves = urg_ves + kves * np.sin(np.deg2rad(hdgs - delta / 2))
-                    drift_vis = urg_vis + kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
+                    drift_ves = a_t * kves * np.sin(np.deg2rad(hdgs - delta / 2))
+                    drift_vis = v_t * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
-                    if method[:3] == 'sim':
-                        drift_ves, drift_vis = drift_ves * accumulator.dt, drift_vis * accumulator.dt
-                        sigma_dv = np.sqrt(w_ves ** 2 * params['sigma_dv'] ** 2 + w_vis ** 2 * params['sigma_dv'] ** 2)
-                        sigma_dv = sigma_dv * np.sqrt(accumulator.dt)
-
-                    drifts = w_ves * drift_ves + w_vis * drift_vis
+                    # Eq 10/17
+                    drifts = w_ves.reshape(-1, 1) * drift_ves + w_vis.reshape(-1, 1) * drift_vis
 
                 if method[:3] == 'sim':
+                    drifts *= accumulator.dt
+                    sigma_dv = params['sigma_dv'] * np.sqrt(orig_dt)
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
                 # calculate cdf and pdfs using signed drift rates now
@@ -390,11 +424,11 @@ def generate_data(params: dict, data: pd.DataFrame(),
                         # ====== RT ======
 
                         # convolve model RT distribution with non-decision time
-                        ndt_dist = norm.pdf(accumulator.tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
+                        ndt_dist = norm.pdf(orig_tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
                         rt_dist = np.squeeze(accumulator.rt_dist[h, :])
                         rt_dist = convolve(rt_dist, ndt_dist / ndt_dist.sum())
-                        rt_dist = rt_dist[:len(accumulator.tvec)]
-                        rt_dist /= rt_dist.sum()
+                        rt_dist = rt_dist[:len(accumulator.tvec)]  
+                        rt_dist /= rt_dist.sum()  # renormalize
 
                         # given RT distribution,
                         #   sample from distribution (generating fake RTs) if method == 'sample'
@@ -402,18 +436,18 @@ def generate_data(params: dict, data: pd.DataFrame(),
 
                         if method[:4] == 'samp':
                             model_data.loc[trial_index, 'RT'] = \
-                                np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
+                                np.random.choice(orig_tvec, trial_index.sum(), replace=True, p=rt_dist)
                         else:
                             if rt_method == 'likelihood':
                                 actual_rts = data.loc[trial_index, 'RT'].values
-                                dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
+                                dist_inds = [np.argmin(np.abs(orig_tvec - rt)) for rt in actual_rts]
                                 model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
                             else:
                                 # check that data doesn't contain RT column?
                                 if rt_method == 'mean':
-                                    model_data.loc[trial_index, 'RT'] = (accumulator.tvec * rt_dist).sum() # expected value
+                                    model_data.loc[trial_index, 'RT'] = (orig_tvec * rt_dist).sum() # expected value
                                 elif rt_method == 'max':
-                                    model_data.loc[trial_index, 'RT'] = accumulator.tvec[np.argmax(rt_dist)]
+                                    model_data.loc[trial_index, 'RT'] = orig_tvec[np.argmax(rt_dist)]
 
     # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
     if method[:4] == 'prob':
@@ -470,27 +504,14 @@ def _intersection_from_margconds(a_given_b, prob_a, prob_b):
 
 def get_stim_urg(tvec: np.ndarray = None, pos: np.ndarray = None, moment=1):
 
-    # define position vector, then diff to get vel/acc
-    # or provide position vector directly (e.g. nexonar sampled)
-    
-    dt = tvec[1] - tvec[0]
-
     if pos is None:
         ampl = 0.16  
         # pos = norm.cdf(tvec, 0.9, 0.3) * ampl
         pos = skewnorm.cdf(tvec, 2, 0.8, 0.4) * ampl # emulate tf
-
-    # dt normalization doesn't really matter if we're dividing by max anyway
-    # vel = np.concatenate([[0], np.diff(pos)/dt]) # metres s^-1
-    # acc = np.concatenate([[0], np.abs(np.diff(vel))]) # metres s^-2
     
     vel = np.gradient(pos)
     acc = np.gradient(vel)
-    acc = np.abs(acc)
     
-    # vel = np.cumsum(vel)
-    # acc = np.cumsum(acc)
-
     vel /= vel.max()
     acc /= acc.max()
     
