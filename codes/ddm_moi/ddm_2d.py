@@ -146,7 +146,7 @@ def objective(params: dict, data: pd.DataFrame,
 def generate_data(params: dict, data: pd.DataFrame(),
             accumulator: AccumulatorModelMOI = AccumulatorModelMOI(),
             method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
-            return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
+            stim_scaling=True, return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Given an accumulator model and trial conditions, this function generates model outputs for behavioral variables.
     Setting method = 'simulate' will simulate decision variables on individual trials

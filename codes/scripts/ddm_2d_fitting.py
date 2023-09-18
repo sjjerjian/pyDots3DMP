@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 import pickle
 import json
@@ -42,27 +41,33 @@ def main():
 
     # initial parameter 'guesses'
     init_params = {
-        'kmult': 0.5,
-        'bound': np.array([1, 1]),
-        'ndt': [0.4, 0.4, 0.4], 
+        'kmult': [1, 1],
+        'bound': [1, 1, 1],
+        'ndt': [0.1, 0.1, 0.1], # TODO allow single ndt value
         'sigma_ndt': 0.05,
     }
     
-    lb = np.array([0.1, 0.1, 0.4, 0.4, 0.05, 0.05, 0.05, 0.0])
-    ub = np.array([5.0, 5.0, 2.0, 2.0, 0.45, 0.45, 0.45, 0.1])
+    lb = np.array([0.1, 0.1, 0.4, 0.4, 0.4, 0.05, 0.05, 0.05, 0.0])
+    ub = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.3, 0.3, 0.3, 0.1])
     
-    plb = np.array([0.2, 0.2, 0.5, 0.5, 0.15, 0.15, 0.15, 0.03])
-    pub = np.array([2.0, 2.0, 1.2, 1.2, 0.35, 0.35, 0.35, 0.06])
+    plb = np.array([0.2, 0.2, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1, 0.03])
+    pub = np.array([1.5, 1.5, 1.5, 1.5, 1.5, 0.25, 0.25, 0.25, 0.06])
     
-    bads_result = run_bads(init_params, accum, data_delta0, bounds=(lb, ub, plb, pub), outputs=['choice', 'RT'], llh_scaling=[1, 0.5])
+    fixed = np.array([0, 0, 0, 0, 0, 0, 0, 0, 1])
+    
+    bads_result = run_bads(init_params, accum, data_delta0, fixed=fixed, bounds=(lb, ub, plb, pub), outputs=['choice', 'RT'], llh_scaling=[1, 1])
     result_to_json(bads_result, "../../data/lucio_bads_result_noPDW.json")
         
+    # for plotting arbitrary parameters, without a fit result
     # fitted_params = {
-    #     'kmult': 0.692,
-    #     'bound': [0.501, 0.499],
-    #     'ndt': [0.4536, 0.6475, 0.5062], 
+    #     'kmult': [80, 80],
+    #     'bound': 1,
+    #     'ndt': [0.1, 0.1, 0.1], 
     #     'sigma_ndt': 0.05,
     # }
+    
+    fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
+    fitted_params['sigma_ndt'] = init_params['sigma_ndt']
     
     model_data = model_predictions(fitted_params, accum, num_hdgs=33, return_wager=False)
     model_data_delta0 = model_data.loc[model_data['delta']==0, :].pipe(replicate_ves)
@@ -84,20 +89,18 @@ def main():
 
     # # bads_result2 = run_bads(init_params2, accum, data_delta0, bounds=(lb, ub, plb, pub), ['choice', 'PDW', 'RT'], [1, 1, 0.1]])
 
-    # # fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
-    # # fitted_params['sigma_ndt'] = init_params['sigma_ndt']
 
 
 
 
 # %% ----------------------------------------------------------------
 
-def run_bads(init_params, accum, data, bounds=None, outputs=['choice', 'RT'], llh_scaling=[1, 1]):
+def run_bads(init_params, accum, data, fixed=None, bounds=None, outputs=['choice', 'RT'], llh_scaling=[1, 1]):
     
     init_params_array = ddm_2d.get_params_array_from_dict(init_params)
-
-    fixed = np.zeros_like(init_params_array)
-    fixed[6] = 1 # fitting all except sigma_ndt
+    
+    if fixed is None:
+        fixed = np.zeros_like(init_params_array)
 
     if bounds is None:
         # set bounds and plausible bounds
@@ -139,12 +142,12 @@ def model_predictions(fitted_params, accum, num_hdgs=33, return_wager=True):
     # rest of conditions list
     mods = np.array([1, 2, 3])
     cohs = np.array([0.2, 0.7])
-    deltas = np.array([-3, 0, 3]) # now include deltas
-    # deltas = np.array([0]) # zero delta only, for quick testing
+    # deltas = np.array([-3, 0, 3]) # now include deltas
+    deltas = np.array([0]) # zero delta only, for quicker testing
 
     data_pred, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
     model_data, _ = ddm_2d.generate_data(params=fitted_params, data=data_pred, accumulator=accum, 
-                                        method=pred_method, rt_method=rt_method, return_wager=return_wager)
+                                        method=pred_method, rt_method=rt_method, stim_scaling=True, return_wager=return_wager)
     
     return model_data
 
