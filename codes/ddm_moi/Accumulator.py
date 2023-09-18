@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import animation
 from scipy.stats import multivariate_normal as mvn
 from dataclasses import dataclass, field
-from functools import lru_cache, wraps
+from numba import jit
 import time
 
 
@@ -182,12 +183,30 @@ class AccumulatorModelMOI:
             fig_pdf.tight_layout()
 
         return fig_cdf, fig_pdf
+    
+    
+    def plot_3d(self, d_ind=-1):
+        def animate_wrap(i):
+            z = self.pdf3D[d_ind, i, :, :]
+            cont = plt.contourf(self.grid_vec, self.grid_vec, z)
+            return cont
+        
+        fig, ax = plt.subplots()
+        anim = animation.FuncAnimation(fig, animate_wrap, frames=len(self.tvec))
+        
+        fig.tight_layout()
+        plt.show()
+        return fig
+        # TODO video/gif style plot of third quadrant pdf at each timestep
+        
+        
+        
 
 # ============
 # functions
-# could make these private methods?
+# make these private methods?
 
-def sj_rot(j, s0, k):
+def _sj_rot(j, s0, k):
     """
 
     :param j: jth image
@@ -209,7 +228,7 @@ def sj_rot(j, s0, k):
     return (1 / np.sin(np.pi / k)) * (s @ s0.T)
 
 
-def weightj(j, mu, sigma, sj, s0):
+def _weightj(j, mu, sigma, sj, s0):
     """
 
     :param j: jth image
@@ -222,7 +241,7 @@ def weightj(j, mu, sigma, sj, s0):
 
     return (-1) ** j * np.exp(mu @ np.linalg.inv(sigma) @ (sj - s0).T)
 
-def corr_num_images(num_images):
+def _corr_num_images(num_images):
     k = int(np.ceil(num_images / 2))
     rho = -np.cos(np.pi / k)
     sigma = np.array([[1, rho], [rho, 1]])
@@ -242,7 +261,7 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
     :param num_images:
     :return:
     """
-    sigma, k = corr_num_images(num_images)
+    sigma, k = _corr_num_images(num_images)
 
     nx, ny = xmesh.shape
     pdf_result = np.empty((len(tvec), nx, ny))
@@ -253,9 +272,7 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
 
-        start = time.time()
-
-        pdf_result[t, :, :] = pdf_at_timestep(tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
+        pdf_result[t, :, :] = _pdf_at_timestep(tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
 
         # pdf_result[t, :, :] = mvn(mean=s0 + mu_t, cov=sigma_t).pdf(xy_mesh)
         # for j in range(1, k*2):
@@ -263,24 +280,20 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
         #     a_j = weightj(j, mu[t, :].T, sigma, sj, s0)
         #     pdf_result[t, :, :] += a_j * mvn(mean=sj + mu_t, cov=sigma_t).pdf(xy_mesh)
 
-        end = time.time()
-        # if t%30 == 0:
-        #     print(f"Time to compute pdf, timestep {t} = {end-start:.4f}")
-
     return pdf_result
 
-
-def pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
+@jit(forceobj=True)
+def _pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
 
     pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
     for j in range(1, k * 2):
-        sj = sj_rot(j, s0, k)
-        a_j = weightj(j, mu.T, sigma, sj, s0)
+        sj = _sj_rot(j, s0, k)
+        a_j = _weightj(j, mu.T, sigma, sj, s0)
         pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
 
     return pdf
 
-
+# @jit(forceobj=True)
 def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
     """
     For a given 2-D particle accumulator with drift mu over time tvec, calculate
@@ -297,7 +310,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     TODO see how much changing the difference between bound and bound_marginal affects anything
 
     """
-    sigma, k = corr_num_images(num_images)
+    sigma, k = _corr_num_images(num_images)
 
     survival_prob = np.ones(len(tvec))
     flux1, flux2 = np.zeros(len(tvec)), np.zeros(len(tvec))
@@ -326,7 +339,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
 
         # loop over images
         for j in range(1, k*2):
-            sj = sj_rot(j, s0, k)
+            sj = _sj_rot(j, s0, k)
 
             mvn_j = mvn(sj + mu_t, cov=sigma*tvec[t])
 
@@ -337,7 +350,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
             cdf_add1 = mvn_j.cdf(bound1) - cdf_add
             cdf_add2 = mvn_j.cdf(bound2) - cdf_add
 
-            a_j = weightj(j, mu[t, :].T, sigma, sj, s0)
+            a_j = _weightj(j, mu[t, :].T, sigma, sj, s0)
 
             cdf_rest += (a_j * cdf_add)
             cdf1 += (a_j * cdf_add1)
@@ -360,18 +373,18 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     pdf_up = np.diff(flux2)
     pdf_lo = np.diff(flux1)
 
-    return p_up, rt_dist
+    return p_up, rt_dist, flux1, flux2
 
-
+@jit(forceobj=True)
 def moi_dv(mu, s=np.array([1, 1]), num_images: int = 7):
 
-    sigma, k = corr_num_images(num_images)
+    sigma, k = _corr_num_images(num_images)
 
     V = np.diag(s) * sigma * np.diag(s)
 
     dv = np.zeros_like(mu)
     for t in range(1, mu.shape[0]):
-        mvn_dv = mvn(mu[t, :].T, cov=V)
+        mvn_dv = mvn(mu[t, :].T, cov=V)  # frozen mv object
         dv[t, :] = mvn_dv.rvs()
 
     dv = dv.cumsum(axis=0)
