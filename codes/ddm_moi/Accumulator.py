@@ -56,14 +56,21 @@ class AccumulatorModelMOI:
         elif isinstance(bound, list):
             bound = np.array(bound)
         
-        assert len(bound) == 2, 'bound must be a single int/float, or a 2-element array'
+        # assert len(bound) == 2, 'bound must be a single int/float, or a 2-element array'
         self.bound = bound
         
+        return self
+    
+    
+    def set_time(self, tvec):
+        self.tvec = tvec
+        self.dt = np.gradient(self.tvec)
+     
         return self
 
     def __post_init__(self):
 
-        self.dt = self.tvec[1] - self.tvec[0]
+        self.dt = np.gradient(self.tvec)
         self.set_bound(self.bound) # in case bound is given as single int/float
 
         if len(self.drift_labels) == 0:
@@ -111,11 +118,10 @@ class AccumulatorModelMOI:
                 # up_cdf = np.cumsum(up_pdf)
                 # lo_cdf = np.cumsum(lo_pdf)
 
-        if return_marginals is False:
-            self.pdf3D = np.stack(pdfs, axis=0)
-        else:
-            self.up_lose_pdf = np.stack(marg_up, axis=0)
-            self.lo_lose_pdf = np.stack(marg_lo, axis=0)
+        self.pdf3D = np.stack(pdfs, axis=0)
+        
+        self.up_lose_pdf = np.stack(marg_up, axis=0)
+        self.lo_lose_pdf = np.stack(marg_lo, axis=0)
 
         return self
 
@@ -126,7 +132,7 @@ class AccumulatorModelMOI:
     def cdf(self):
         p_corr, rt_dist = [], []
         for drift in self.drift_rates:
-            p_up, rt = moi_cdf(self.tvec, drift, self.bound, 0.025, self.num_images)
+            p_up, rt, _, _ = moi_cdf(self.tvec, drift, self.bound, 0.025, self.num_images)
             p_corr.append(p_up)
             rt_dist.append(rt)
 
@@ -147,7 +153,9 @@ class AccumulatorModelMOI:
         return self
 
     def plot(self, d_ind=-1, include_pdfs=True, include_logodds=True):
-
+        
+        # d_ind - index of which drift to plot
+        
         fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
         axc[0].plot(self.drift_labels, self.p_corr)
         axc[0].set_xlabel('drift')

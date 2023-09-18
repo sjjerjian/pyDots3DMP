@@ -114,7 +114,9 @@ def objective(params: dict, data: pd.DataFrame,
 
     if outputs is None:
         outputs = ['choice', 'PDW', 'RT']
-        llh_scaling = [1, 1, 1]
+        
+    if llh_scaling is None:
+        llh_scaling = np.ones(len(outputs))
 
     # only calculate pdfs if fitting confidence variable
     return_wager = 'PDW' in outputs
@@ -303,15 +305,14 @@ def generate_data(params: dict, data: pd.DataFrame(),
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
                 # calculate cdf and pdfs using signed drift rates now
-
+                
                 if drifts.ndim == 2:
                     drifts_list = [drifts[:, i:i+1] for i in range(drifts.shape[1])]
                 else:
                     drifts_list = drifts.tolist()
-                    
                 accumulator.set_drifts(drifts_list, hdgs)
 
-                # don't need to run this is simulating dv!
+                # don't need to run this if simulating dv!
                 if method[:3] != 'sim':
                     start_time = time.time()
                     accumulator.dist(return_pdf=return_wager)
@@ -360,13 +361,14 @@ def generate_data(params: dict, data: pd.DataFrame(),
                                 final_v = dv[rt_ind, choice ^ 1]
 
                             if return_wager:
-                                grid_ind = np.argmin(np.abs((accumulator.grid_vec + accumulator.bound[choice]) - final_v))
+                                
+                                grid_ind = np.argmin(np.abs(accumulator.grid_vec - final_v))
                                 # log_odds = log_odds_maps[m][rt_ind, grid_ind]
                                 wager = int(log_odds_above_threshold[m][rt_ind, grid_ind])  # lookup log odds thres
                                 #wager *= (np.random.random() > params['alpha'])  # incorporate base-rate of low bets
                                 model_data.loc[these_trials[tr], 'PDW'] = wager
 
-                            # flip choice result so that left choices = 0, right choices = 1
+                            # flip choice result so that left choices = 0, right choices = 1 in the output
                             model_data.loc[these_trials[tr], 'choice'] = choice ^ 1
 
                             # RT = decision time + non-decision time
@@ -514,7 +516,7 @@ def get_stim_urg(tvec: np.ndarray = None, pos: np.ndarray = None, moment=1):
     
     vel /= vel.max()
     acc /= acc.max()
-    
+
     if moment == 1 or moment == 'vel':
         return vel        
 
