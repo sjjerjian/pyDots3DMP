@@ -41,10 +41,10 @@ def concat_aligned_rates(fr_list, tvecs=None) -> tuple[Union[list, tuple], Union
     return rates_cat, len_intervals
 
 
-def mask_low_firing(f_rates: np.ndarray, minfr=0, dim=1) -> np.ndarray:
+def mask_low_firing(f_rates: np.ndarray, minfr=0) -> np.ndarray:
 
     # TODO find a way to not exclude units not recorded in all conditions!
-    mean_fr = np.squeeze(np.nanmean(f_rates, axis=dim))
+    mean_fr = np.squeeze(np.nanmean(f_rates, axis=1)) # across conditions
     lowfr_units = np.logical_or(np.isnan(mean_fr), mean_fr <= minfr)
     lowfr_units = mean_fr <= minfr
 
@@ -124,19 +124,55 @@ def outcome_prob(f_rates: np.ndarray,
         if np.sum(ic == c):
             y_inds = condlist.loc[ic==c, outcome_col] - 1
             
-            try:
-                for u in range(f_rates.shape[0]):
-                    for t in range(f_rates.shape[2]):
-                        fr = f_rates[u, ic==c, t]
-                        nan_idx = np.isnan(fr)
-                        if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1:
-                            continue
-                        out_prob[u, c, t] = roc_auc_score(y_inds[~nan_idx], fr[~nan_idx])
-            except ValueError:
-                print(u, t)
+            for u in range(f_rates.shape[0]):
+                for t in range(f_rates.shape[2]):
+                    fr = f_rates[u, ic==c, t]
+                    nan_idx = np.isnan(fr)
+                    if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1:
+                        continue
+                    out_prob[u, c, t] = roc_auc_score(y_inds[~nan_idx], fr[~nan_idx])
 
     return out_prob, cg
 
+
+def pref_hdg(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups=None,
+             cond_cols=None, method: str = 'peak') -> np.ndarray:
+    
+    # f_rates should be raw, or fit
+    # for each row in cond_groups
+    # take peak, or sum of left vs right
+    
+    # TODO need to account for cond_groups as well (also above)
+    if cond_cols is None:
+        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains('heading')]
+        
+    cg = cond_groups[cond_cols].drop_duplicates()
+    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+    
+    if f_rates.ndim == 2:
+        f_rates = f_rates[:, :, np.newaxis]
+    pref_hdgs = np.full((f_rates.shape[0], nC, f_rates.shape[2]), fill_value=np.nan)
+
+    for c in range(nC):
+        fr_c = f_rates[:, ic==c, ...]
+        hdg_c = condlist.loc[ic==c, 'heading'].values
+        fr_c[np.isnan(fr_c)] = 0
+        
+        if method == 'peak':
+            pref_hdgs[:, c, :] = np.sign(hdg_c[np.argmax(fr_c, axis=1)])
+        elif method == 'sum':
+            pref_hdgs[:, c, :] = np.sign(np.sum(fr_c[:, hdg_c > 0, ...], axis=1) - \
+                                np.sum(fr_c[:, hdg_c < 0, ...], axis=1))
+            
+        elif method == 'trapz':
+            pref_hdgs[:, c, :] = np.sign(np.trapz(fr_c[:, hdg_c >= 0, ...],
+                                                  x=hdg_c[hdg_c >= 0]) - \
+                                         np.trapz(fr_c[:, hdg_c <= 0, ...],
+                                                  x=hdg_c[hdg_c <= 0])
+            )
+                                                        
+    return np.squeeze(pref_hdgs)
+            
 
 def roc_auc_threshold(firing_rates, labels, num_points=100):
 
@@ -234,7 +270,7 @@ def build_pseudopop(popn_dfs, tr_tab,
             stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
             for sess in range(len(fr_list)):
                 stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
-                u_pos = u_pos + num_units[sess]
+                u_pos += num_units[sess]
 
         else:
             if j==0:
@@ -242,8 +278,8 @@ def build_pseudopop(popn_dfs, tr_tab,
 
             stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
             for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos + num_units[sess], 0:len(conds_dfs[sess])] = np.squeeze(fr_list[sess][j])
-                u_pos = u_pos + num_units[sess]
+                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess])] = np.squeeze(fr_list[sess][j])
+                u_pos += num_units[sess]
 
     # list of area, session number, and unit number within session, for each unit
     area = [p.area for n, p in zip(num_units, popn_dfs) for _ in range(n)] # TODO deal with area=None
