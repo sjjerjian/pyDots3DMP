@@ -178,8 +178,87 @@ class PseudoPop:
         self.firing_rates = self.unit_session[inds, ...]
 
         return self
-
     
+    
+    # TODO make sure this all works kosher
+    def concat_alignments(self, insert_blank=True):
+        
+        if rates_separated:
+           
+            if self.psth_params['binsize'] == 0:
+                tvecs = None
+                self.concat_ints = len(self.firing_rates)
+            else:
+                tvecs = self.timestamps
+                
+            concat_result = concat_aligned_rates_single(self.firing_rates, tvecs=tvecs, insert_blank=insert_blank)
+            
+            self.firing_rates = concat_result[0]
+            if self.psth_params['binsize'] > 0:
+                self.timestamps = concat_result[1]
+                self.concat_ints = concat_result[2]
+        else:
+            print("Firing rates already a single array, skipping...\n")
+            
+        return self       
+                
+    def split_alignments(self):
+        if not rates_separated:
+            self.firing_rates = np.split(self.firing_rates, self.concat_ints, axis=2)
+        else:
+            print("Firing rates already a list of alignments, skipping...\n")
+
+        return self
+    
+    
+    def demean(self, t_bsln: tuple=(0, None), across_conds=True, standardize=True, return_split=True):
+        
+        axis = 2
+        if across_conds:
+            axis = (1, 2)
+
+        # get the indices
+        t_int, t_range = t_bsln
+        
+        if t_range is None:
+            ind0, ind1 = 0, len(self.timestamps[t_int])
+        else:
+            ind0 = np.argmin(self.timestamps[t_int] - t_range[0])
+            ind1 = np.argmin(self.timestamps[t_int] - t_range[1]) 
+        
+        if rates_separated:
+            self.concat_alignments()
+
+        # subtract average baseline
+        bsln_fr = np.mean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
+        self.firing_rates -= bsln_fr  
+        
+        if standardize:
+            bsln_std = np.std(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
+            self.firing_rates /= bsln_std
+        
+        if return_split:
+            self.split_alignments()
+            
+        return self
+                
+    
+    def normalize(self, t_bsln: tuple=(0, None), across_conds=True, softmax_const=0):
+        
+        self.demean(t_bsln, return_split=False)
+        
+        axis = 2
+        if across_conds:
+            axis = (1, 2)
+            
+        # divide by absolute max across time and conditions
+        max_fr = np.max(np.abs(self.firing_rates), axis=(1, 2))
+        self.firing_rates /= (max_fr + softmax_const)
+        
+        self.split_alignments()
+    
+        return self    
+
 
 
 # %% util functions
