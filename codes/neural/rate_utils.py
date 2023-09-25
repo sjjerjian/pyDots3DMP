@@ -12,33 +12,66 @@ from scipy.signal import gaussian
 from sklearn.metrics import roc_auc_score, roc_curve, auc
 
 from typing import Union
-from neural.NeuralDataClasses import PseudoPop
 
 # in all functions,
 #    f_rates denotes a unit x trial x time numpy array of firing rates
 #    fr_list denotes a list of f_rates arrays, one per interval/alignment
 
 
-def concat_aligned_rates(fr_list, tvecs=None) -> tuple[Union[list, tuple], Union[list, tuple]]:
+def concat_aligned_rates(fr_list, tvecs=None, insert_blank=False) -> tuple[Union[list, tuple], Union[list, tuple]]:
     """
     given multiple f_rates matrices stored in a list (e.g. different alignments),
     stack them.
     so instead of having to loop over alignments, we can apply functions on all firing rates at once
-    this works for a list of lists (e.g. a list of multiple recording populations)
+    this works for a list of lists (e.g. a list of multiple recording populations
     """
 
-    if tvecs is not None:
-        # concatenate all different alignments...
-        # but store the lens for later splits
-        len_intervals = [np.asarray(list(map(lambda x: x.size, t)),
-                         dtype='int').cumsum() for t in tvecs]
-        rates_cat = list(map(lambda x: np.concatenate(x, axis=2), fr_list))
-    else:
-        # each 'interval' is length 1 if binsize was set to 0
-        len_intervals = [np.ones(len(r), dtype=int).cumsum() for r in fr_list]
-        rates_cat = list(map(np.dstack, fr_list))
+    # if tvecs is not None:
+    #     # concatenate all different alignments...
+    #     # but store the lens for later splits
+    #     len_intervals = [np.asarray(list(map(lambda x: x.size, t)), dtype='int').cumsum() for t in tvecs]
+    #     if insert_blank:
+    #         rates_cat = list(map(lambda x: np.concatenate((x, np.full(x.shape[0], x.shape[1], 1), np.nan),
+    #                                                       axis=2), fr_list))
+    #         tvecs_cat = list(map(lambda x: np.concatenate((x, np.full(x.shape[0], x.shape[1], 1), np.nan),
+    #                                                       axis=2), tvecs))
+    #     else:
+    #         rates_cat = list(map(lambda x: np.concatenate(x, axis=2), fr_list))
+    #         tvecs_cat = list(map(lambda x: np.concatenate(x, axis=2), tvecs))
+           
+    # else:
+    #     # each 'interval' is length 1 if binsize was set to 0
+    #     len_intervals = [np.ones(len(r), dtype=int).cumsum() for r in fr_list]
+    #     rates_cat = list(map(np.dstack, fr_list))
 
-    return rates_cat, len_intervals
+    # return rates_cat, tvecs_cat, len_intervals
+    
+    rates_cat, tvecs_cat, len_intervals = [], [], []
+    for f, t in zip(fr_list, tvecs):
+        rates_cat, tvecs_cat, len_intervals = concat_aligned_rates_single(f, tvecs=t, insert_blank=insert_blank)
+        
+    return 
+
+
+def concat_aligned_rates_single(frs: list[np.ndarray], tvecs=None, insert_blank=False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    
+    if tvecs is not None:
+        # concatenate all different alignments, but store the lens for later splits
+        len_intervals = np.array(list(map(lambda x: x.size, tvecs)), dtype='int').cumsum()
+        if insert_blank:
+            rates_cat = np.concatenate((frs, np.full(frs.shape[0], frs.shape[1], 1), np.nan), axis=2)
+            tvecs_cat = np.concatenate((tvecs, np.full(tvecs.shape[0], tvecs.shape[1], 1), np.nan), axis=2)
+        else:
+            rates_cat = np.concatenate(frs, axis=2)
+            tvecs_cat = np.concatenate(tvecs, axis=2)
+           
+    else:
+        # each 'interval' is length 1, if binsize was set to 0
+        rates_cat = np.dstack(frs)
+        tvecs_cat = None
+        len_intervals = None
+
+    return rates_cat, tvecs_cat, len_intervals
 
 
 def mask_low_firing(f_rates: np.ndarray, minfr=0) -> np.ndarray:
