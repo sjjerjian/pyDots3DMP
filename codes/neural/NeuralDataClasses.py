@@ -95,12 +95,12 @@ class ksUnit(Unit):
         return fig, ax
 
 
-# %% Population class (simul)
-
+# %% Population class (simultaneously recorded, storing individual spiketimes)
 
 @dataclass
 class Population:
 
+    # recording metadata
     rec_date: date = date.today().strftime("%Y%m%d")
     create_date: date = date.today().strftime("%Y%m%d")
     subject: str = ''
@@ -109,6 +109,7 @@ class Population:
     probe_num: int = 1
     device: str = ''
 
+    # additional metadata, regarding penetration
     pen_num: int = 1
     grid_xy: tuple[int] = field(default=(np.nan, np.nan))
     grid_type: str = ''
@@ -144,18 +145,20 @@ class PseudoPop:
     # firing rates will be numpy array units x 'trials'/conditions x time
 
     subject: str
-
+    
     area: np.ndarray = field(repr=False)
     unit_session: np.ndarray = field(repr=False)
-
     clus_group: np.ndarray = field(repr=False, metadata={1: 'MU', 2: 'SU'})
+
+    # one list entry per alignment event
+    firing_rates: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'spikes/sec'})
+    timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
+    
+    rates_separated: bool = True
 
     conds: tuple = field(default_factory=tuple, repr=False)
     psth_params: dict = field(default_factory=dict, repr=False)
-
-    firing_rates: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'spikes/sec'})
-    timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
-
+    
     create_date: date = date.today().strftime("%Y%m%d")
 
     # TODO add in events, and alignment times!!
@@ -398,8 +401,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         # trial_psth in list comp is going to generate a list of tuples
         # the zip(*iterable) syntax allows us to unpack the tuples into separate variables
         spike_counts, t_vec, _ = \
-            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, sm_params))
-                  for unit in units])
+            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, sm_params)) for unit in units])
 
         rates.append(np.asarray(spike_counts))
         tvecs.append(np.asarray(t_vec[0]))
@@ -438,6 +440,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
 # %% PLOTTING UTILITY FUNCTIONS
 
 # TODO add separate function just for plotting psths, with multiple alignments possible
+# this could be overlapping with the function for plotting psths for population...
 
 def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFrame, col: str, hue: str,
                 titles=None, suptitle: str = '', align_label='',

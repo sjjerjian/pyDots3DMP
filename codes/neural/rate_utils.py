@@ -88,12 +88,12 @@ def mask_low_firing(f_rates: np.ndarray, minfr=0) -> np.ndarray:
 
 def condition_index(condlist: pd.DataFrame, cond_groups=None) -> tuple[np.ndarray, int, pd.DataFrame]:
     """
-    given a single trial conditions list, and a specified unique set of conditions,
+    given a single trial conditions list, and a unique set of conditions,
     return the trial index for each condition
     """
     if cond_groups is None:
-        cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0,
-                                    return_inverse=True)
+        # cond_groups not specified, use all unique trial types
+        cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0, return_inverse=True)
         cond_groups = pd.DataFrame(cond_groups, columns=condlist.columns)
 
     else:
@@ -101,18 +101,12 @@ def condition_index(condlist: pd.DataFrame, cond_groups=None) -> tuple[np.ndarra
         assert isinstance(cond_groups, pd.DataFrame)
         cond_groups = cond_groups.loc[:, condlist.columns]
 
-        # fill with nan?
         ic = np.full(condlist.shape[0], fill_value=-1, dtype=int)
         for i, cond in enumerate(cond_groups.values):
             ic[(condlist == cond).all(axis=1)] = i
 
     nC = len(cond_groups.index)
     return ic, nC, cond_groups
-
-
-def condition_averages_ds(ds, *args):
-    # xarray groupby doesn't support multiple columns, this is low priority
-    ...
 
 
 def condition_averages(f_rates, condlist, cond_groups=None) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:

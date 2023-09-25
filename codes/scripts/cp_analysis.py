@@ -1,4 +1,4 @@
-# %% ========================
+# %% ----------------------------------------------------------------
 # imports 
 
 import numpy as np
@@ -10,7 +10,7 @@ from behavior.preprocessing import dots3DMP_create_trial_list, add_trial_outcome
 from neural.rate_utils import build_pseudopop, concat_aligned_rates, outcome_prob
 from neural.tuning_utils import *
 
-# %% ========================
+# %% ----------------------------------------------------------------
 # load data 
 
 data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data'
@@ -23,7 +23,7 @@ with open(filename, 'rb') as file:
 pars = ['Tuning', 'Task']
 data = data.loc[data[pars].notna().all(axis=1) & data['is_good']]
 
-# %% ========================
+# %% ----------------------------------------------------------------
 # define conditions of interest 
 
 # these are the same for tuning and task
@@ -41,7 +41,7 @@ tr_tab_task = dots3DMP_create_trial_list(
 tr_tab_task.columns = cond_labels  
 
 
-# %% ========================
+# %% ----------------------------------------------------------------
 # for choice probability calculations, we need single trial firing rates
 
 t_params = {'align_ev': ['stimOn', 'saccOnset'],
@@ -63,7 +63,7 @@ rates_task, units_task, conds_task, tvecs_task, _ = \
 
 rates_cat, len_intervals = concat_aligned_rates(rates_task)
 
-# %% 
+# %% ----------------------------------------------------------------
 choice_probs, wager_probs = [], []
 #choice_conds, wager_conds = [], []
 
