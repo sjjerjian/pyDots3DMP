@@ -121,7 +121,6 @@ class Population:
 
     units: list[Unit] = field(default_factory=list, repr=False)
     events: dict = field(default_factory=dict, repr=False)
-    rel_event_times: dict = field(default_factory=dict, repr=False, init=False)
 
     def __len__(self):
         return len(self.units)
@@ -132,7 +131,7 @@ class Population:
         return False
 
     def popn_rel_event_times(self, align=['stimOn'], others=['stimOff']):
-        self.rel_event_times = rel_event_times(self.events, align, others)
+        return rel_event_times(self.events, align, others)
 
     def get_firing_rates(self, *args, **kwargs):
         return calc_firing_rates(self.units, self.events, *args, **kwargs)
