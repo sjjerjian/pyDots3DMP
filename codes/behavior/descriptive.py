@@ -81,12 +81,12 @@ def replicate_ves(df):
     """
     dup_ves = df.loc[df['modality']==1, :]
     ucohs = np.unique(df['coherence'])
-
-    for ucoh in ucohs:
-        dup_ves['coherence'] = ucoh
-        df = pd.concat([df, dup_ves])
-
-    return df
+    ucohs = ucohs[ucohs != np.unique(dup_ves['coherence'])]
+    
+    result_df = pd.concat([dup_ves.assign(coherence=coh) for coh in ucohs], ignore_index=True)
+    result_df = pd.concat((df, result_df), ignore_index=True)
+    
+    return result_df
 
 
 def logit_fit_choice_hdg(df, num_hdgs: int = 200) -> pd.Series:
