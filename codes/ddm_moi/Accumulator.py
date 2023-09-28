@@ -91,8 +91,6 @@ class AccumulatorModelMOI:
 
     # TODO clean this up a bit, if we can?
     grid_vec: np.ndarray = np.array([])
-    grid_xmesh: np.ndarray = np.array([])
-    grid_ymesh: np.ndarray = np.array([])
     p_corr: np.ndarray = np.array([])
     rt_dist: np.ndarray = np.array([])
     pdf3D: np.ndarray = np.array([])
@@ -111,8 +109,8 @@ class AccumulatorModelMOI:
 
         return self
     
+    # TODO make PEP8 getter and setter methods
     def set_bound(self, bound):
-        
         if isinstance(bound, (int, float)):
             bound = np.array([bound, bound])
         elif isinstance(bound, list):
@@ -203,20 +201,23 @@ class AccumulatorModelMOI:
 
         return self
 
+
     def dv(self, drift, sigma):
         return moi_dv(mu=drift, s=sigma, num_images=self.num_images)
 
+
     def dist(self, return_pdf=False):
-        self.cdf()
+        self._cdf()
 
         if return_pdf:
-            self.pdf(return_marginals=True)
+            self._pdf()
 
         return self
 
-    def plot(self, d_ind=-1, include_pdfs=True, include_logodds=True):
+
+    def plot(self, d_ind=-1):
         
-        # d_ind - index of which drift to plot
+        # d_ind - index of which drift to plot for PDFs
         
         fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
         axc[0].plot(self.drift_labels, self.p_corr)
@@ -229,8 +230,9 @@ class AccumulatorModelMOI:
         axc[1].set_xlabel('Time (s)')
         axc[1].set_title('RT distribution (no NDT)')
         fig_cdf.tight_layout()
-
-        if include_pdfs:
+        
+        fig_pdf = None
+        if self.up_lose_pdf:
             fig_pdf, axp = plt.subplots(2+include_logodds, 1, figsize=(5, 6))
             contour = axp[0].contourf(self.tvec, self.grid_vec,
                                       log_pmap(np.squeeze(self.up_lose_pdf[d_ind, :, :])).T,
@@ -243,7 +245,7 @@ class AccumulatorModelMOI:
             cbar = fig_cdf.colorbar(contour, ax=axp[0])
             cbar = fig_cdf.colorbar(contour, ax=axp[1])
 
-            if include_logodds:
+            if self.log_odds:
                 vmin, vmax = 0, 3
                 contour = axp[2].contourf(self.tvec, self.grid_vec,
                                           self.log_odds.T, vmin=vmin, vmax=vmax,
@@ -424,7 +426,6 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
             cdf_add2 = mvn_j.cdf(bound2) - cdf_add
 
             a_j = _weightj(j, mu[t, :].T, sigma, sj, s0)
-
             cdf_rest += (a_j * cdf_add)
             cdf1 += (a_j * cdf_add1)
             cdf2 += (a_j * cdf_add2)
@@ -432,10 +433,6 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
         survival_prob[t] = cdf_rest
         flux1[t] = cdf1
         flux2[t] = cdf2
-
-        #end = time.time()
-        # if t%30 == 0:
-        #      print(f"Time to compute cdf, timestep {t} = {end-start:.4f}")
 
     p_up = np.sum(flux2) / np.sum(flux1 + flux2)
 
@@ -448,8 +445,8 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
 
     return p_up, rt_dist, flux1, flux2
 
-@jit(forceobj=True)
-def moi_dv(mu, s=np.array([1, 1]), num_images: int = 7):
+@np_cache
+def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7) -> np.ndarray:
 
     sigma, k = _corr_num_images(num_images)
 
@@ -483,7 +480,7 @@ def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
     return mu
 
 
-def log_odds(pdf1, pdf2):
+def log_odds(pdf1: np.ndarray, pdf2: np.ndarray) -> np.ndarray:
     """
     calculate log posterior odds of correct choice
     assumes that drift is the first dimension, which gets marginalized over
@@ -501,7 +498,7 @@ def log_odds(pdf1, pdf2):
     return np.log(odds)
 
 
-def log_pmap(pdf, q=30):
+def log_pmap(pdf: np.ndarray, q: int = 30) -> np.ndarray:
     """
     for visualization of losing accumulator pdf, it's likely helpful to perform a cutoff and look at log space
     :param pdf:
@@ -510,3 +507,8 @@ def log_pmap(pdf, q=30):
     """
     pdf[pdf < 10**(-q)] = 10**(-q)
     return (np.log10(pdf)+q) / q
+
+
+
+
+
