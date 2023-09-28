@@ -485,18 +485,19 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
 
                         if method[:4] == 'samp':
                             model_data.loc[trial_index, 'RT'] = \
-                                np.random.choice(orig_tvec, trial_index.sum(), replace=True, p=rt_dist)
+                                np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
                         else:
                             if rt_method == 'likelihood':
                                 actual_rts = data.loc[trial_index, 'RT'].values
-                                dist_inds = [np.argmin(np.abs(orig_tvec - rt)) for rt in actual_rts]
+                                dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
                                 model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
+                                # NOTE in this case we save the likelihood values, not an RT value!
                             else:
                                 # check that data doesn't contain RT column?
                                 if rt_method == 'mean':
-                                    model_data.loc[trial_index, 'RT'] = (orig_tvec * rt_dist).sum() # expected value
+                                    model_data.loc[trial_index, 'RT'] = (accumulator.tvec * rt_dist).sum() # expected value
                                 elif rt_method == 'max':
-                                    model_data.loc[trial_index, 'RT'] = orig_tvec[np.argmax(rt_dist)]
+                                    model_data.loc[trial_index, 'RT'] = accumulator.tvec[np.argmax(rt_dist)]
 
     # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
     if method[:4] == 'prob':
