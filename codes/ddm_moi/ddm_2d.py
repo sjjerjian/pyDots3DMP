@@ -1,15 +1,20 @@
 import numpy as np
 import pandas as pd
-import time
 
 from scipy.signal import convolve
 from scipy.stats import norm, truncnorm, skewnorm
 from collections import OrderedDict
 
+from functools import wraps
+from codetiming import Timer
+
 from ddm_moi.Accumulator import AccumulatorModelMOI
 
+# import warnings
+# warnings.simplefilter('error')
 
 def optim_decorator(loss_func):
+    @wraps(loss_func)
     def wrapper(params: np.ndarray, init_params: OrderedDict, fixed: np.ndarray = None, *args, **kwargs):
    
         if fixed is None:
@@ -24,11 +29,7 @@ def optim_decorator(loss_func):
         init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
         params_array = set_params_list(params, init_params_array, fixed)
 
-        # TODO do we really care about the order here? maybe not, but certainly above, because
-        # fixed and bounds are specified as an array, so we need to be sure that the ordering of params in the array
-        # matches what we expect
-
-        # convert back to OrderedDict for passing to loss function
+        # convert back to dict for passing to loss function
         params_dict = set_params_dict_from_array(params_array, init_params)
 
         ii = 0
@@ -37,11 +38,12 @@ def optim_decorator(loss_func):
             print(f"{key}: {val}\t")
             ii +=1
 
-        start_time = time.time()
+        # start_time = time.time()
         loss_val, llhs, model_data = loss_func(params_dict, *args, **kwargs)
-        end_time = time.time()
+        # end_time = time.time()
 
-        print(f"Total loss:{loss_val:.2f}, time taken: {end_time - start_time:.2f}s")
+        print(f"Total loss:{loss_val:.2f}")
+        # print(f"time taken: {end_time - start_time:.2f}s")     
         print({key : round(llhs[key], 2) for key in llhs})
         print('\n\n')
 
@@ -361,10 +363,7 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
 
                 # don't need to run this if simulating dv!
                 if method[:3] != 'sim':
-                    start_time = time.time()
                     accumulator.dist(return_pdf=return_wager)
-                    end_time = time.time()
-                    print(f"Time to run accum dist: {(end_time-start_time):.2f}s\n")
 
                 for h, hdg in enumerate(hdgs):
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
@@ -475,6 +474,9 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
                         # convolve model RT distribution with non-decision time
                         ndt_dist = norm.pdf(orig_tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
                         rt_dist = np.squeeze(accumulator.rt_dist[h, :])
+                        
+                        eps = np.finfo(np.float64).eps
+                        rt_dist[rt_dist<eps] = eps
                         rt_dist = convolve(rt_dist, ndt_dist / ndt_dist.sum())
                         rt_dist = rt_dist[:len(accumulator.tvec)]  
                         rt_dist /= rt_dist.sum()  # renormalize
