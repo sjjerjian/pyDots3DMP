@@ -37,39 +37,41 @@ def main():
     # %% ----------------------------------------------------------------
     # Run first optimization for choice and RT only
     
-    accum = AccumulatorModelMOI(tvec=np.arange(0, 2, 0.05), grid_vec=np.arange(-3, 0, 0.025))
+    accum=dict()
+    accum['tvec'] = np.arange(0, 2, 0.01)
+    accum['grid_vec'] = np.arange(-3, 0, 0.025)
 
     # initial parameter 'guesses'
     init_params = {
-        'kmult': [1, 1],
-        'bound': [1, 1, 1],
-        'ndt': [0.1, 0.1, 0.1], # TODO allow single ndt value
+        'kmult': [0.3, 0.4],
+        'bound': [0.6, 1, 1],
+        'ndt': .15, 
         'sigma_ndt': 0.05,
     }
     
-    lb = np.array([0.1, 0.1, 0.4, 0.4, 0.4, 0.05, 0.05, 0.05, 0.0])
-    ub = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.3, 0.3, 0.3, 0.1])
+    lb = np.array([0.05, 0.4, 0.4, 0.4, 0.05, 0.0])
+    ub = np.array([10, 5, 5, 5, 0.4, 0.1])
     
-    plb = np.array([0.2, 0.2, 0.5, 0.5, 0.5, 0.1, 0.1, 0.1, 0.03])
-    pub = np.array([1.5, 1.5, 1.5, 1.5, 1.5, 0.25, 0.25, 0.25, 0.06])
+    plb = np.array([0.1, 0.5, 0.5, 0.5, 0.1, 0.03])
+    pub = np.array([5, 3, 3, 3, 0.3, 0.06])
     
-    fixed = np.array([0, 0, 0, 0, 0, 0, 0, 0, 1])
+    fixed = np.array([0, 0, 0, 0, 0, 1])
     
-    bads_result = run_bads(init_params, accum, data_delta0, fixed=fixed, bounds=(lb, ub, plb, pub), outputs=['choice', 'RT'], llh_scaling=[1, 1])
-    result_to_json(bads_result, "../../data/lucio_bads_result_noPDW.json")
+    # bads_result = run_bads(init_params, data_delta0, accum, fixed=fixed, bounds=(lb, ub, plb, pub), outputs=['choice', 'RT'], llh_scaling=[1, 1])
+    # result_to_json(bads_result, "../../data/lucio_bads_result_noPDW.json")
+    
+    # fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
+    # fitted_params['sigma_ndt'] = init_params['sigma_ndt']
         
     # for plotting arbitrary parameters, without a fit result
     # fitted_params = {
-    #     'kmult': [80, 80],
-    #     'bound': 1,
-    #     'ndt': [0.1, 0.1, 0.1], 
-    #     'sigma_ndt': 0.05,
+    #     'kmult': [0.3, 0.4],
+    #     'bound': [0.6, 1, 1],
+    #     'ndt': .15, 
+    #     'sigma_ndt': 0.001,
     # }
     
-    fitted_params = ddm_2d.set_params_dict_from_array(bads_result.x, init_params)
-    fitted_params['sigma_ndt'] = init_params['sigma_ndt']
-    
-    model_data = model_predictions(fitted_params, accum, num_hdgs=33, return_wager=False)
+    model_data = model_predictions(fitted_params, accum, num_hdgs=11, return_wager=False)
     model_data_delta0 = model_data.loc[model_data['delta']==0, :].pipe(replicate_ves)
         
     plot_results(data_delta0, model_data_delta0, hue='modality', return_wager=False)
@@ -91,11 +93,9 @@ def main():
 
 
 
-
-
 # %% ----------------------------------------------------------------
 
-def run_bads(init_params, accum, data, fixed=None, bounds=None, outputs=['choice', 'RT'], llh_scaling=[1, 1]):
+def run_bads(init_params, data, accum_kw, fixed=None, bounds=None, outputs=['choice', 'RT'], llh_scaling=[1, 1]):
     
     init_params_array = ddm_2d.get_params_array_from_dict(init_params)
     
@@ -113,7 +113,8 @@ def run_bads(init_params, accum, data, fixed=None, bounds=None, outputs=['choice
 
     # lambda function to handle custom arguments
     target = lambda params: ddm_2d.objective(params, init_params, fixed,
-                                            data=data, accumulator=accum,
+                                            data=data, accum_kw=accum_kw,
+                                            stim_scaling=True,
                                             outputs=outputs, llh_scaling=llh_scaling)
 
     bads = BADS(target, init_params_array, lb, ub, plb, pub)
@@ -146,7 +147,7 @@ def model_predictions(fitted_params, accum, num_hdgs=33, return_wager=True):
     deltas = np.array([0]) # zero delta only, for quicker testing
 
     data_pred, ntrials = dots3DMP_create_trial_list(hdgs, mods, cohs, deltas, nreps, shuff=False)
-    model_data, _ = ddm_2d.generate_data(params=fitted_params, data=data_pred, accumulator=accum, 
+    model_data, _ = ddm_2d.generate_data(params=fitted_params, data=data_pred, accum_kw=accum, 
                                         method=pred_method, rt_method=rt_method, stim_scaling=True, return_wager=return_wager)
     
     return model_data

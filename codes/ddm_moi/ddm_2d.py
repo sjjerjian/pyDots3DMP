@@ -108,9 +108,8 @@ def set_params_dict_from_array(params_array: np.ndarray, ref_dict: dict):
 
 
 @optim_decorator
-def objective(params: dict, data: pd.DataFrame,
-                     accumulator: AccumulatorModelMOI,
-                     outputs=None, llh_scaling=None):
+def objective(params: dict, data: pd.DataFrame, accum_kw: dict,
+              outputs=None, stim_scaling=True, llh_scaling=None):
 
     if outputs is None:
         outputs = ['choice', 'PDW', 'RT']
@@ -122,8 +121,8 @@ def objective(params: dict, data: pd.DataFrame,
     return_wager = 'PDW' in outputs
 
     # get model predictions (probabilistic) given parameters and trial conditions in data
-    model_data, _ = generate_data(params=params, data=data, accumulator=accumulator,
-                                  method='prob', return_wager=return_wager)
+    model_data, _ = generate_data(params=params, data=data, accum_kw=accum_kw,
+                                  stim_scaling=stim_scaling, method='prob', return_wager=return_wager)
 
     # calculate log likelihoods of parameters, given observed data
 
@@ -144,11 +143,10 @@ def objective(params: dict, data: pd.DataFrame,
 
     return neg_llh, model_llh, model_data
 
-
-def generate_data(params: dict, data: pd.DataFrame(),
-            accumulator: AccumulatorModelMOI = AccumulatorModelMOI(),
-            method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
-            stim_scaling=True, return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
+@Timer(name="ddm_run_timer")
+def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
+                  method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
+                  stim_scaling=True, return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Given an accumulator model and trial conditions, this function generates model outputs for behavioral variables.
     Setting method = 'simulate' will simulate decision variables on individual trials
