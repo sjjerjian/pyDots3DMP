@@ -175,35 +175,43 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
     
     # process some inputs
     
+    accumulator = AccumulatorModelMOI(**accum_kw)
     orig_tvec = accumulator.tvec
-    orig_dt = np.unique(accumulator.dt)
-
+    
     accumulator.set_bound(params['bound'])
     
+    if isinstance(params['ndt'], (int, float)):
+        params['ndt'] = [params['ndt']] * len(mods)
+    
     if not stim_scaling:
+        # b_ves, b_vis = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
         b_ves, b_vis = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
-        a_t, v_t = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
+        kmult_scaling = 100
     else:  
+        
         b_ves = get_stim_urg(tvec=accumulator.tvec, moment='acc')
         b_vis = get_stim_urg(tvec=accumulator.tvec, moment='vel')
-        a_t = np.cumsum((b_ves**2)/(b_ves**2).sum()).reshape(-1, 1)
-        v_t = np.cumsum((b_vis**2)/(b_vis**2).sum()).reshape(-1, 1)
         
-        # a_t = a_t/a_t.sum() * len(accumulator.tvec)
-        # v_t = v_t/v_t.sum() * len(accumulator.tvec)
+        # new time is squared accumulated time course of sensitivity
+        cumul_bves = np.cumsum((b_ves**2)/(b_ves**2).sum()) 
+        cumul_bvis = np.cumsum((b_vis**2)/(b_vis**2).sum())
+        
+        kmult_scaling = 10
+        
+    b_ves, b_vis = b_ves.reshape(-1, 1), b_vis.reshape(-1, 1)
+            
+    # scale up to usable value - downweighted the input parameter to try to keep parameters the same order of magnitude
     
-    # scale up by 100 - downweighted the input parameter to try to keep parameters the same order of magnitude
-    params['kmult'] *= 1000
-    
-    if isinstance(params['kmult'], (int, float)) or len(params['kmult']) == 1:
-        kvis = params['kmult'] * cohs.T
+    kmult = params['kmult'] * kmult_scaling
+    if isinstance(kmult, (int, float)) or len(kmult) == 1:
+        kvis = kmult * cohs.T
         kves = np.mean(kvis)
     else:
-        kves = params['kmult'][0]
-        kvis = params['kmult'][1] * cohs.T
+        kves = kmult[0]
+        kvis = kmult[1] * cohs.T
 
     # ====== generate pdfs and log_odds for confidence
-    # loop over modalities. 
+    # loop over modalities
     # marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
     # sensitivity is determined not just be k (internal sensivitity) but also b (external sensivitity)
     # i.e. time-dependent stimulus reliability
@@ -218,21 +226,50 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
                 accumulator.set_bound(params['bound'][m])
 
             if mod == 1:
-                # Drugo 2014 supplementary 1 Eq 7 (b(t) is inside the momentary evidence term so we square)
-                abs_drifts = a_t * kves * sin_uhdgs
-                accumulator.set_time(a_t.squeeze() * orig_tvec[-1])
+                # Drugo 2014 supplementary materials:
+                # passage of time is now the cumulative sensitivity of the stimulus
+                # b(t) is also within the momentary evidence term, hence the squaring, and this deals with any negatives (e.g. in acceleration)
+                # divide by the new passage of time, simply because we re-multiply by it in the Accumulator Class logic, and this will give the position of the particle
+                if stim_scaling:
+                        accumulator.set_time(cumul_bves * orig_tvec[-1])
+                        abs_drifts = np.cumsum(b_ves**2 * kves * sin_uhdgs, axis=0) / accumulator.tvec.reshape(-1, 1)  
+                else:
+                    abs_drifts = kves * sin_uhdgs
+                        
+                abs_drifts = b_ves * kves * sin_uhdgs
+
                 
             elif mod == 2:
-                abs_drifts = v_t * np.mean(kvis) * sin_uhdgs
-                accumulator.set_time(v_t.squeeze() * orig_tvec[-1])
+                if stim_scaling:
+                        accumulator.set_time(cumul_bvis * orig_tvec[-1])
+                        abs_drifts = np.cumsum(b_vis**2 * np.mean(kvis) * sin_uhdgs, axis=0) / accumulator.tvec.reshape(-1, 1)
+                else:
+                    abs_drifts = np.mean(kvis) * sin_uhdgs
 
             elif mod == 3:
-                k_comb2 = a_t * kves**2 + v_t * np.mean(kvis)**2
-                abs_drifts = np.sqrt(k_comb2) * sin_uhdgs
+                
+                kves2, kvis2 = kves**2, np.mean(kvis)**2
+                kcomb2 = kves2 + kvis2
+            
+                w_ves = np.sqrt(kves2 / kcomb2)
+                w_vis = np.sqrt(kvis2 / kcomb2)
+                
+                # Eq 14
+                if stim_scaling:
+                    t_comb = (kves2 / kcomb2) * cumul_bves + (kvis2 / kcomb2) * cumul_bvis
+                    accumulator.set_time(t_comb * orig_tvec[-1])
+                                        
+                    drift_ves = np.cumsum(b_ves**2 * kves * sin_uhdgs, axis=0)
+                    drift_vis = np.cumsum(b_vis**2 * np.mean(kvis) * sin_uhdgs, axis=0)
+                    abs_drifts = w_ves * drift_ves + w_vis * drift_vis
+                    abs_drifts /= accumulator.tvec.reshape(-1, 1)
+                else:
+                    abs_drifts = np.sqrt(kcomb2).reshape(-1, 1) * sin_uhdgs
+
     
                 # Eq 14
-                t_comb = ((b_ves*kves)**2 / k_comb2) * a_t.squeeze() + ((b_vis*np.mean(kvis))**2 / k_comb2) * v_t.squeeze()
-                accumulator.set_time(t_comb/t_comb.max() * orig_tvec[-1])
+                # t_comb = ((b_ves*kves)**2 / kcomb2) * cumul_bves + ((b_vis*np.mean(kvis))**2 / kcomb2) * cumul_bvis
+                
 
             if abs_drifts.ndim == 2:
                 drifts_list = [abs_drifts[:, i:i+1] for i in range(abs_drifts.shape[1])]
@@ -250,7 +287,6 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
             # if purely evidence dependent, then set it based on grid_vec, 1 below, zero above
 
         log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
-
 
     # now to generate model results, loop over all conditions
     print('generating model results')
@@ -271,31 +307,44 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
                 print(mod, coh, delta)
 
                 if mod == 1:
-                    drifts = a_t * kves * np.sin(np.deg2rad(hdgs))
-                    accumulator.set_time(a_t.squeeze() * orig_tvec[-1])
+                    if stim_scaling:
+                        accumulator.set_time(cumul_bves * orig_tvec[-1])
+                        drifts = np.cumsum(b_ves**2 * kves * np.sin(np.deg2rad(hdgs)), axis=0) / accumulator.tvec.reshape(-1, 1)
+                    else:
+                        drifts_flat = kves * np.sin(np.deg2rad(hdgs))
 
-                if mod == 2:
-                    drifts = v_t * kvis[c] * np.sin(np.deg2rad(hdgs))
-                    accumulator.set_time(v_t.squeeze() * orig_tvec[-1])
+                elif mod == 2:
+                    if stim_scaling:
+                        accumulator.set_time(cumul_bvis * orig_tvec[-1])
+                        drifts = np.cumsum(b_vis**2 * kvis[c] * np.sin(np.deg2rad(hdgs)), axis=0) / accumulator.tvec.reshape(-1, 1)
+                    else:
+                        drifts = kvis * np.sin(np.deg2rad(hdgs))
 
                 elif mod == 3:
                     
-                    kves2, kvis2 = (b_ves*kves)**2, (b_vis*kvis[c])**2 
-                    k_comb2 = kves2 + (b_vis*np.mean(kvis))**2
-        
+                    kves2, kvis2 = kves**2, kvis[c]**2 
+                    kcomb2 = kves2 + kvis2
+                                
+                    w_ves = np.sqrt(kves2 / kcomb2)
+                    w_vis = np.sqrt(kvis2 / kcomb2)
+                    
                     # Eq 14
-                    t_comb = ((b_ves*kves)**2 / k_comb2) * a_t.squeeze() + ((b_vis*np.mean(kvis))**2 / k_comb2) * v_t.squeeze()
-                    accumulator.set_time(t_comb/t_comb.max() * orig_tvec[-1])
-                
-                    w_ves = np.sqrt(kves2 / k_comb2)
-                    w_vis = np.sqrt(kvis2 / k_comb2)
+                    if stim_scaling:
+                        t_comb = (kves2 / kcomb2) * cumul_bves + (kvis2 / kcomb2) * cumul_bvis
+                        accumulator.set_time(t_comb * orig_tvec[-1])
 
-                    # +ve delta means ves to the left, vis to the right
-                    drift_ves = a_t * kves * np.sin(np.deg2rad(hdgs - delta / 2))
-                    drift_vis = v_t * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
+                        drift_ves = np.cumsum(b_ves**2 * kves * np.sin(np.deg2rad(hdgs - delta / 2)), axis=0)
+                        drift_vis = np.cumsum(b_vis**2 * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2)), axis=0)
+                        
+                    else:
+                        # +ve delta means ves to the left, vis to the right
+                        drift_ves = kves * np.sin(np.deg2rad(hdgs - delta / 2))
+                        drift_vis = kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
                     # Eq 10/17
-                    drifts = w_ves.reshape(-1, 1) * drift_ves + w_vis.reshape(-1, 1) * drift_vis
+                    drifts = w_ves * drift_ves + w_vis * drift_vis
+                    drifts /= accumulator.tvec.reshape(-1, 1)
+            
 
                 if method[:3] == 'sim':
                     drifts *= accumulator.dt
