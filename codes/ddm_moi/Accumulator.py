@@ -4,7 +4,69 @@ from matplotlib import animation
 from scipy.stats import multivariate_normal as mvn
 from dataclasses import dataclass, field
 from numba import jit
-import time
+from functools import lru_cache, wraps
+
+import threading
+from codetiming import Timer
+from joblib import Memory
+
+# memory = Memory(location='.', verbose=0)
+
+
+# https://stackoverflow.com/questions/52331944/cache-decorator-for-numpy-arrays
+def np_cache(function):
+    @lru_cache
+    def cached_wrapper(*args, **kwargs):
+
+        args = [np.array(a) if isinstance(a, tuple) and not isinstance(a, (int, float)) else a for a in args]
+        kwargs = {
+            k: np.array(v) if isinstance(v, tuple) and not isinstance(v, (int, float)) else v for k, v in kwargs.items()
+        }
+
+        # call the function now, with the array arguments
+        return function(*args, **kwargs)
+
+    # wrapper to convert array inputs to hashables, for caching
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        args = [tuple(tuple(row) for row in a) if isinstance(a, np.ndarray) and a.ndim > 1 else tuple(a) for a in args]
+        kwargs = {
+            k: tuple(tuple(row) for row in v) if isinstance(v, np.ndarray) and v.ndim > 1 else tuple(v) for k, v in kwargs.items()
+        }
+        return cached_wrapper(*args, **kwargs)
+
+    # copy lru_cache attributes over too
+    wrapper.cache_info = cached_wrapper.cache_info
+    wrapper.cache_clear = cached_wrapper.cache_clear
+
+    return wrapper
+
+def np_cache_minimal(function):
+    @lru_cache
+    def cached_wrapper(*args, **kwargs):
+
+        args = [np.array(a) if isinstance(a, tuple) else a for a in args]
+        kwargs = {
+            k: np.array(v) if isinstance(v, tuple) else v for k, v in kwargs.items()
+        }
+
+        # call the function now, with the array arguments
+        return function(*args, **kwargs)
+
+    # wrapper to convert array inputs to hashables, for caching
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        args = [tuple(a) if isinstance(a, np.ndarray) else a for a in args]
+        kwargs = {
+            k: tuple(v) if isinstance(v, np.ndarray) else v for k, v in kwargs.items()
+        }
+        return cached_wrapper(*args, **kwargs)
+
+    # copy lru_cache attributes over too
+    wrapper.cache_info = cached_wrapper.cache_info
+    wrapper.cache_clear = cached_wrapper.cache_clear
+
+    return wrapper
 
 
 @dataclass(repr=False)
@@ -249,6 +311,8 @@ def _weightj(j, mu, sigma, sj, s0):
 
     return (-1) ** j * np.exp(mu @ np.linalg.inv(sigma) @ (sj - s0).T)
 
+
+@lru_cache(maxsize=32)
 def _corr_num_images(num_images):
     k = int(np.ceil(num_images / 2))
     rho = -np.cos(np.pi / k)
@@ -318,6 +382,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     TODO see how much changing the difference between bound and bound_marginal affects anything
 
     """
+    
     sigma, k = _corr_num_images(num_images)
 
     survival_prob = np.ones(len(tvec))
