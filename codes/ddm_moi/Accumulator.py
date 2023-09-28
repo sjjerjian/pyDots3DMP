@@ -97,7 +97,7 @@ class AccumulatorModelMOI:
     up_lose_pdf: np.ndarray = np.array([])
     lo_lose_pdf: np.ndarray = np.array([])
     log_odds: np.ndarray = np.array([])
-
+    
     dt: float = field(init=False)
 
     def _scale_drift(self):
@@ -262,17 +262,37 @@ class AccumulatorModelMOI:
     
     
     def plot_3d(self, d_ind=-1):
+        
+        # fig, ax = plt.subplots()
+        # cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, 0, :, :])
+        # ax.set_title(f't = {self.tvec[i]:.2f}')
+        # fig.canvas.draw()
+        
+        # for i in range(1, len(self.tvec)):
+        #     cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, i, :, :])
+        #     ax.set_title(f't = {self.tvec[i]:.2f}')
+        #     fig.canvas.draw()
+            
+        # plt.show()
+        
+        
         def animate_wrap(i):
             z = self.pdf3D[d_ind, i, :, :]
             cont = plt.contourf(self.grid_vec, self.grid_vec, z)
             return cont
         
-        fig, ax = plt.subplots()
-        anim = animation.FuncAnimation(fig, animate_wrap, frames=len(self.tvec))
+        def init():
+            cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, 0, :, :])
+            return cont
         
-        fig.tight_layout()
-        plt.show()
-        return fig
+        anim_event = threading.Event()
+
+        fig, ax = plt.subplots()
+        anim = animation.FuncAnimation(fig, animate_wrap, frames=len(self.tvec),
+                                       init_func=init, interval=50, repeat=False)
+        
+        anim_event.wait()
+        
         # TODO video/gif style plot of third quadrant pdf at each timestep
         
         
@@ -280,8 +300,8 @@ class AccumulatorModelMOI:
 
 # ============
 # functions
-# make these private methods?
 
+@np_cache_minimal
 def _sj_rot(j, s0, k):
     """
 
