@@ -148,51 +148,55 @@ class AccumulatorModelMOI:
         return self
 
 
-    def pdf(self, return_marginals=True, return_mesh=True):
+    def _pdf(self, full_pdf=False):
 
         # TODO allow flexible specification of grid_vec, to use mgrid
-        xmesh, ymesh = np.meshgrid(self.grid_vec, self.grid_vec)
-
-        if return_mesh:
-            self.grid_xmesh = xmesh
-            self.grid_ymesh = ymesh
+        if full_pdf:
+            xmesh, ymesh = np.meshgrid(self.grid_vec, self.grid_vec)
+        else:
+            xmesh1, ymesh1 = np.meshgrid(self.grid_vec, self.grid_vec[-1])
+            ymesh2, xmesh2 = np.meshgrid(self.grid_vec, self.grid_vec[-1])
 
         pdfs, marg_up, marg_lo = [], [], []
 
         for drift in self.drift_rates:
 
-            pdf_3d = moi_pdf(xmesh, ymesh, self.tvec, drift, self.bound, self.num_images)
-
-            if return_marginals is False:
+            if full_pdf:
+                # TODO make this a class method
+                pdf_3d = moi_pdf(xmesh, ymesh, self.tvec, drift, self.bound, self.num_images)
                 pdfs.append(pdf_3d)
+                
+                pdf_up = pdf_3d[:, :, -1] # right bound
+                pdf_lo = pdf_3d[:, -1, :]  # top bound
+                
             else:
-
-                # distribution of losing accumulator, GIVEN that winner has hit bound
-                marg_up.append(pdf_3d[:, :, -1])  # right bound
-                marg_lo.append(pdf_3d[:, -1, :])  # top bound
-
-                # I think this is right, pdf of losing accumulator summed across all values of dv
-                # up_pdf = np.sum(pdf_3d[:, :, -1], axis=1)
-                # lo_pdf = np.sum(pdf_3d[:, -1, :], axis=1)
-
-                # up_cdf = np.cumsum(up_pdf)
-                # lo_cdf = np.cumsum(lo_pdf)
-
-        self.pdf3D = np.stack(pdfs, axis=0)
+            
+                # start = time.time()
+                pdf_lo = moi_pdf(xmesh1, ymesh1, self.tvec, drift, self.bound, self.num_images)
+                pdf_up = moi_pdf(xmesh2, ymesh2, self.tvec, drift, self.bound, self.num_images)
+            
+            # distribution of losing accumulator, GIVEN that winner has hit bound
+            marg_up.append(pdf_up)  # right bound
+            marg_lo.append(pdf_lo)  # top bound
+            
+        if full_pdf:
+            self.pdf3D = np.stack(pdfs, axis=0)
         
         self.up_lose_pdf = np.stack(marg_up, axis=0)
         self.lo_lose_pdf = np.stack(marg_lo, axis=0)
 
         return self
+    
 
     def log_posterior_odds(self):
         self.log_odds = log_odds(self.up_lose_pdf, self.lo_lose_pdf)
         return self
 
-    def cdf(self):
+
+    def _cdf(self):
         p_corr, rt_dist = [], []
         for drift in self.drift_rates:
-            p_up, rt, _, _ = moi_cdf(self.tvec, drift, self.bound, 0.025, self.num_images)
+            p_up, rt, flux1, flux2 = moi_cdf(self.tvec, drift, self.bound, 0.025, self.num_images)
             p_corr.append(p_up)
             rt_dist.append(rt)
 
@@ -338,36 +342,46 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
     sigma, k = _corr_num_images(num_images)
 
     nx, ny = xmesh.shape
-    pdf_result = np.empty((len(tvec), nx, ny))
+    pdf_result = np.zeros((len(tvec), nx, ny)).squeeze()
 
     xy_mesh = np.dstack((xmesh, ymesh))
+    print(xy_mesh.shape)
 
     s0 = -bound
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
 
-        pdf_result[t, :, :] = _pdf_at_timestep(tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
+        pdf_result[t, ...] = pdf_at_timestep(tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
 
-        # pdf_result[t, :, :] = mvn(mean=s0 + mu_t, cov=sigma_t).pdf(xy_mesh)
+        # pdf_result[t, ...] = mvn(mean=s0 + mu_t, cov=sigma_t).pdf(xy_mesh)
         # for j in range(1, k*2):
         #     sj = sj_rot(j, s0, k)
         #     a_j = weightj(j, mu[t, :].T, sigma, sj, s0)
-        #     pdf_result[t, :, :] += a_j * mvn(mean=sj + mu_t, cov=sigma_t).pdf(xy_mesh)
+        #     pdf_result[t, ...] += a_j * mvn(mean=sj + mu_t, cov=sigma_t).pdf(xy_mesh)
 
     return pdf_result
 
-@jit(forceobj=True)
-def _pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
 
-    pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
+@np_cache
+def mvn_timestep(mean: np.ndarray, cov: np.ndarray):
+    return mvn(mean=mean, cov=cov)
+
+
+@np_cache
+def pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
+
+    # pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
+    pdf = mvn_timestep(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
     for j in range(1, k * 2):
         sj = _sj_rot(j, s0, k)
         a_j = _weightj(j, mu.T, sigma, sj, s0)
-        pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
+        # pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
+        pdf += a_j * mvn_timestep(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
+
 
     return pdf
 
-# @jit(forceobj=True)
+# @Timer(name='moi_cdf')
 def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
     """
     For a given 2-D particle accumulator with drift mu over time tvec, calculate
@@ -398,12 +412,14 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
 
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
-
-        #start = time.time()
+        
+        if tvec[t] == 0:
+            # tvec[t] = np.finfo(np.float64).eps
+            tvec[t] = np.min(tvec[tvec>0])
 
         mu_t = mu[t, :].T * tvec[t]
 
-        mvn_0 = mvn(s0 + mu_t, cov=sigma * tvec[t])
+        mvn_0 = mvn_timestep(mean=s0 + mu_t, cov=sigma * tvec[t])
 
         # total density within boundaries
         cdf_rest = mvn_0.cdf(bound0)
@@ -416,7 +432,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
         for j in range(1, k*2):
             sj = _sj_rot(j, s0, k)
 
-            mvn_j = mvn(sj + mu_t, cov=sigma*tvec[t])
+            mvn_j = mvn_timestep(mean=sj + mu_t, cov=sigma * tvec[t])
 
             # total density WITHIN boundaries for jth image
             cdf_add = mvn_j.cdf(bound0)
