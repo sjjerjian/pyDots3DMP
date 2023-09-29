@@ -1,50 +1,36 @@
 import numpy as np
 import pandas as pd
-import time
 
 from scipy.signal import convolve
-from scipy.stats import norm, truncnorm
+from scipy.stats import norm, truncnorm, skewnorm
 from collections import OrderedDict
+
+from functools import wraps
+from codetiming import Timer
 
 from ddm_moi.Accumulator import AccumulatorModelMOI
 
+# import warnings
+# warnings.simplefilter('error')
 
 def optim_decorator(loss_func):
-
+    @wraps(loss_func)
     def wrapper(params: np.ndarray, init_params: OrderedDict, fixed: np.ndarray = None, *args, **kwargs):
    
-        # params has to already be an array, because it is the first argument in the optimization function
-        # init_params should be ordered dicts, so here I extract array format
-        # to replace params with init_params where fixed index is true
-
         if fixed is None:
             fixed = np.zeros_like(params)
 
         if 'PDW' in kwargs['outputs']:
-            param_keys = ['kmult', 'bound', 'alpha', 'theta', 'ndt', 'sigma_ndt']
+            param_keys = ['kmult', 'bound', 'ndt', 'sigma_ndt', 'theta', 'alpha']
         else:
             param_keys = ['kmult', 'bound', 'ndt', 'sigma_ndt']
 
+        # convert initial parameters to array, to replace params where fixed is true
         init_params_array = get_params_array_from_dict(init_params, param_keys=param_keys)
         params_array = set_params_list(params, init_params_array, fixed)
 
-        # convert back to OrderedDict for passing to loss function
-        params_dict = OrderedDict()
-        current_index = 0
-        for key, value in init_params.items():
-            if isinstance(value, list):
-                value_length = len(value)
-                params_dict[key] = params_array[current_index:current_index + value_length]
-            elif isinstance(value, np.ndarray):
-                value_length = value.shape[0]
-                params_dict[key] = params_array[current_index:current_index + value_length]
-            else:
-                value_length = 1
-                params_dict[key] = params_array[current_index]
-            current_index += value_length
-
-
-        #print(params_dict)
+        # convert back to dict for passing to loss function
+        params_dict = set_params_dict_from_array(params_array, init_params)
 
         ii = 0
         for key, val in params_dict.items():
@@ -52,11 +38,12 @@ def optim_decorator(loss_func):
             print(f"{key}: {val}\t")
             ii +=1
 
-        start_time = time.time()
+        # start_time = time.time()
         loss_val, llhs, model_data = loss_func(params_dict, *args, **kwargs)
-        end_time = time.time()
+        # end_time = time.time()
 
-        print(f"Total loss:{loss_val:.2f}, time taken: {end_time - start_time:.2f}s")
+        print(f"Total loss:{loss_val:.2f}")
+        # print(f"time taken: {end_time - start_time:.2f}s")     
         print({key : round(llhs[key], 2) for key in llhs})
         print('\n\n')
 
@@ -64,8 +51,8 @@ def optim_decorator(loss_func):
             print(params_dict)
             raise ValueError("loss function evaluated to infinite")
 
-
         # if all parameters are fixed, we're not trying to fit, we just want the model predictions
+        # probably unneccesary, if you just want the model predicts then call generate_data directly
         if (fixed==1).all():
             return loss_val, llhs, model_data
         else:
@@ -103,20 +90,41 @@ def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndar
     return np.array(values_list)
 
 
+def set_params_dict_from_array(params_array: np.ndarray, ref_dict: dict):
+    
+    params_dict = OrderedDict()
+    current_index = 0
+    for key, value in ref_dict.items():
+        if isinstance(value, list):
+            value_length = len(value)
+            params_dict[key] = params_array[current_index:current_index + value_length]
+        elif isinstance(value, np.ndarray):
+            value_length = value.shape[0]
+            params_dict[key] = params_array[current_index:current_index + value_length]
+        else:
+            value_length = 1
+            params_dict[key] = params_array[current_index]
+        current_index += value_length
+
+    return params_dict
+
+
 @optim_decorator
-def ddm_2d_objective(params: dict, data: pd.DataFrame,
-                     accumulator: AccumulatorModelMOI,
-                     outputs=None, llh_scaling=None):
+def objective(params: dict, data: pd.DataFrame, accum_kw: dict,
+              outputs=None, stim_scaling=True, llh_scaling=None):
 
     if outputs is None:
         outputs = ['choice', 'PDW', 'RT']
-        llh_scaling = [1, 1, 1]
+        
+    if llh_scaling is None:
+        llh_scaling = np.ones(len(outputs))
 
     # only calculate pdfs if fitting confidence variable
-    return_pdf = 'PDW' in outputs
+    return_wager = 'PDW' in outputs
 
     # get model predictions (probabilistic) given parameters and trial conditions in data
-    model_data, _ = ddm_2d_generate_data(params=params, data=data, accumulator=accumulator, method='prob', return_wager=return_pdf)
+    model_data, _ = generate_data(params=params, data=data, accum_kw=accum_kw,
+                                  stim_scaling=stim_scaling, method='prob', return_wager=return_wager)
 
     # calculate log likelihoods of parameters, given observed data
 
@@ -125,7 +133,7 @@ def ddm_2d_objective(params: dict, data: pd.DataFrame,
     # choice and PDW likelihoods according to bernoulli probability
     model_llh['choice'] = np.sum(np.log(model_data.loc[data['choice'] == 1, 'choice'])) + \
                            np.sum(np.log((1 - model_data.loc[data['choice'] == 0, 'choice'])))
-    if return_pdf:
+    if return_wager:
         model_llh['PDW'] = np.sum(np.log(model_data.loc[data['PDW'] == 1, 'PDW'])) + \
                             np.sum(np.log(1 - model_data.loc[data['PDW'] == 0, 'PDW']))
 
@@ -137,11 +145,10 @@ def ddm_2d_objective(params: dict, data: pd.DataFrame,
 
     return neg_llh, model_llh, model_data
 
-
-def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
-                         accumulator: AccumulatorModelMOI = AccumulatorModelMOI(),
-                         method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
-                         return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
+@Timer(name="ddm_run_timer")
+def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
+                  method: str = 'simulate', rt_method: str = 'likelihood', save_dv: bool = False, 
+                  stim_scaling=True, return_wager: bool = True) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Given an accumulator model and trial conditions, this function generates model outputs for behavioral variables.
     Setting method = 'simulate' will simulate decision variables on individual trials
@@ -156,8 +163,6 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
     :return:
     """
 
-    # TODO add RT_method ' to return likelihood, or mean RT, or max of distribution'
-    # TODO urgency and ves/vis scaling
     # TODO add wager_method options: 'log_odds', 'time', 'evidence'
     # TODO add cue weighting options: 'optimal', 'random', 'fixed'
     # TODO unit tests
@@ -169,46 +174,132 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
 
     model_data = data.loc[:, ['heading', 'coherence', 'modality', 'delta']]
     model_data[['choice', 'PDW', 'RT']] = np.nan
-
-    # this is a placeholder, eventually should be acc, vel
-    urg_ves, urg_vis = 1, 1
-
-    kvis = params['kmult'] * cohs.T * 100  # scale the parameter up
-    kves = np.mean(kvis)  # for now, this means vis and ves do end up with the same log odds map
-    accumulator.bound = params['bound']
+    
+    # process some inputs
+    
+    accumulator = AccumulatorModelMOI(**accum_kw)
+    orig_tvec = accumulator.tvec
+    
+    accumulator.set_bound(params['bound'])
+    
+    if isinstance(params['ndt'], (int, float)):
+        params['ndt'] = [params['ndt']] * len(mods)
+    
+    if not stim_scaling:
+        # b_ves, b_vis = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
+        b_ves, b_vis = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
+        kmult_scaling = 100
+    else:  
+        
+        b_ves = get_stim_urg(tvec=accumulator.tvec, moment='acc')
+        b_vis = get_stim_urg(tvec=accumulator.tvec, moment='vel')
+        
+        # new time is squared accumulated time course of sensitivity
+        cumul_bves = np.cumsum((b_ves**2)/(b_ves**2).sum()) 
+        cumul_bvis = np.cumsum((b_vis**2)/(b_vis**2).sum())
+        
+        kmult_scaling = 10
+        
+    b_ves, b_vis = b_ves.reshape(-1, 1), b_vis.reshape(-1, 1)
+            
+    # scale up to usable value - downweighted the input parameter to try to keep parameters the same order of magnitude
+    
+    kmult = params['kmult'] * kmult_scaling
+    if isinstance(kmult, (int, float)) or len(kmult) == 1:
+        kvis = kmult * cohs.T
+        kves = np.mean(kvis)
+    else:
+        kves = kmult[0]
+        kvis = kmult[1] * cohs.T
 
     # ====== generate pdfs and log_odds for confidence
-    # loop over modalities. marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
+    # loop over modalities
+    # marginalize over cohs, and ignore delta (assume confidence mapping is stable across these)
+    # sensitivity is determined not just be k (internal sensivitity) but also b (external sensivitity)
+    # i.e. time-dependent stimulus reliability
 
     log_odds_maps = []
     if return_wager:
         sin_uhdgs = np.sin(np.deg2rad(hdgs[hdgs >= 0]))
 
         for m, mod in enumerate(mods):
+            
+            if len(accumulator.bound) == 3:
+                accumulator.set_bound(params['bound'][m])
 
             if mod == 1:
-                abs_drifts = urg_ves * kves * sin_uhdgs
+                # Drugo 2014 supplementary materials:
+                # passage of time is now the cumulative sensitivity of the stimulus
+                # b(t) is also within the momentary evidence term, hence the squaring, and this deals with any negatives (e.g. in acceleration)
+                # divide by the new passage of time, simply because we re-multiply by it in the Accumulator Class logic, and this will give the position of the particle
+                if stim_scaling:
+                        accumulator.set_time(cumul_bves * orig_tvec[-1])
+                        abs_drifts = np.cumsum(b_ves**2 * kves * sin_uhdgs, axis=0) / accumulator.tvec.reshape(-1, 1)  
+                else:
+                    abs_drifts = kves * sin_uhdgs
+                        
+                abs_drifts = b_ves * kves * sin_uhdgs
 
+                
             elif mod == 2:
-                abs_drifts = urg_vis * np.mean(kvis) * sin_uhdgs
+                if stim_scaling:
+                        accumulator.set_time(cumul_bvis * orig_tvec[-1])
+                        abs_drifts = np.cumsum(b_vis**2 * np.mean(kvis) * sin_uhdgs, axis=0) / accumulator.tvec.reshape(-1, 1)
+                else:
+                    abs_drifts = np.mean(kvis) * sin_uhdgs
 
             elif mod == 3:
-                abs_drifts = np.sqrt(urg_ves * kves ** 2 + urg_vis * np.mean(kvis) ** 2) * sin_uhdgs
+                
+                kves2, kvis2 = kves**2, np.mean(kvis)**2
+                kcomb2 = kves2 + kvis2
+            
+                w_ves = np.sqrt(kves2 / kcomb2)
+                w_vis = np.sqrt(kvis2 / kcomb2)
+                
+                # Eq 14
+                if stim_scaling:
+                    t_comb = (kves2 / kcomb2) * cumul_bves + (kvis2 / kcomb2) * cumul_bvis
+                    accumulator.set_time(t_comb * orig_tvec[-1])
+                                        
+                    drift_ves = np.cumsum(b_ves**2 * kves * sin_uhdgs, axis=0)
+                    drift_vis = np.cumsum(b_vis**2 * np.mean(kvis) * sin_uhdgs, axis=0)
+                    abs_drifts = w_ves * drift_ves + w_vis * drift_vis
+                    abs_drifts /= accumulator.tvec.reshape(-1, 1)
+                else:
+                    abs_drifts = np.sqrt(kcomb2).reshape(-1, 1) * sin_uhdgs
 
+    
+                # Eq 14
+                # t_comb = ((b_ves*kves)**2 / kcomb2) * cumul_bves + ((b_vis*np.mean(kvis))**2 / kcomb2) * cumul_bvis
+                
+
+            if abs_drifts.ndim == 2:
+                drifts_list = [abs_drifts[:, i:i+1] for i in range(abs_drifts.shape[1])]
+            else:
+                drifts_list = abs_drifts.tolist()
+                
             # run the method of images dtb to extract pdfs, cdfs, and LPO
-            accumulator.set_drifts(list(abs_drifts), hdgs[hdgs >= 0])
+            accumulator.set_drifts(drifts_list, hdgs[hdgs >= 0])
             accumulator.dist(return_pdf=True).log_posterior_odds()
             log_odds_maps.append(accumulator.log_odds)
 
-            # TODO this is where we would enforce different confidence mappings - simply by reassigning log_odds_maps / log_odds_above_threshold
+            # TODO this is where we would enforce different confidence mappings
+            # simply by reassigning log_odds_maps / log_odds_above_threshold
             # if confidence is purely time dependent, then we would set a log odds threshold map that is all ones to the left of threshold, and zeros to the right
             # if purely evidence dependent, then set it based on grid_vec, 1 below, zero above
 
         log_odds_above_threshold = [p >= theta for p, theta in zip(log_odds_maps, params['theta'])]
 
-    print('generating model results')
     # now to generate model results, loop over all conditions
+    print('generating model results')
     for m, mod in enumerate(mods):
+        
+        if len(accumulator.bound) == 3:
+                accumulator.set_bound(params['bound'][m])
+        
+        ndt_min = params['ndt'][m] / 2
+        ndt_max = params['ndt'][m] + ndt_min
+        
         for c, coh in enumerate(cohs):
             for d, delta in enumerate(deltas):
 
@@ -218,40 +309,61 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                 print(mod, coh, delta)
 
                 if mod == 1:
-                    drifts = urg_ves * kves * np.sin(np.deg2rad(hdgs))
+                    if stim_scaling:
+                        accumulator.set_time(cumul_bves * orig_tvec[-1])
+                        drifts = np.cumsum(b_ves**2 * kves * np.sin(np.deg2rad(hdgs)), axis=0) / accumulator.tvec.reshape(-1, 1)
+                    else:
+                        drifts_flat = kves * np.sin(np.deg2rad(hdgs))
 
-                    if method == 'simulate' or method == 'sim':
-                        drifts *= accumulator.dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
-
-                if mod == 2:
-                    drifts = urg_vis * kvis[c] * np.sin(np.deg2rad(hdgs))
-
-                    if method == 'simulate' or method == 'sim':
-                        drifts *= accumulator.dt
-                        sigma_dv = params['sigma_dv'] * np.sqrt(accumulator.dt)
+                elif mod == 2:
+                    if stim_scaling:
+                        accumulator.set_time(cumul_bvis * orig_tvec[-1])
+                        drifts = np.cumsum(b_vis**2 * kvis[c] * np.sin(np.deg2rad(hdgs)), axis=0) / accumulator.tvec.reshape(-1, 1)
+                    else:
+                        drifts = kvis * np.sin(np.deg2rad(hdgs))
 
                 elif mod == 3:
-                    w_ves = np.sqrt(kves ** 2 / (kves ** 2 + kvis[c] ** 2))
-                    w_vis = np.sqrt(kvis[c] ** 2 / (kves ** 2 + kvis[c] ** 2))
+                    
+                    kves2, kvis2 = kves**2, kvis[c]**2 
+                    kcomb2 = kves2 + kvis2
+                                
+                    w_ves = np.sqrt(kves2 / kcomb2)
+                    w_vis = np.sqrt(kvis2 / kcomb2)
+                    
+                    # Eq 14
+                    if stim_scaling:
+                        t_comb = (kves2 / kcomb2) * cumul_bves + (kvis2 / kcomb2) * cumul_bvis
+                        accumulator.set_time(t_comb * orig_tvec[-1])
 
-                    # +ve delta means ves to the left, vis to the right
-                    drift_ves = urg_ves * kves * np.sin(np.deg2rad(hdgs - delta / 2))
-                    drift_vis = urg_ves * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
+                        drift_ves = np.cumsum(b_ves**2 * kves * np.sin(np.deg2rad(hdgs - delta / 2)), axis=0)
+                        drift_vis = np.cumsum(b_vis**2 * kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2)), axis=0)
+                        
+                    else:
+                        # +ve delta means ves to the left, vis to the right
+                        drift_ves = kves * np.sin(np.deg2rad(hdgs - delta / 2))
+                        drift_vis = kvis[c] * np.sin(np.deg2rad(hdgs + delta / 2))
 
-                    if method == 'simulate' or method == 'sim':
-                        drift_ves, drift_vis = drift_ves * accumulator.dt, drift_vis * accumulator.dt
-                        sigma_dv = np.sqrt(w_ves ** 2 * params['sigma_dv'] ** 2 + w_vis ** 2 * params['sigma_dv'] ** 2)
-                        sigma_dv = sigma_dv * np.sqrt(accumulator.dt)
-
+                    # Eq 10/17
                     drifts = w_ves * drift_ves + w_vis * drift_vis
+                    drifts /= accumulator.tvec.reshape(-1, 1)
+            
 
-                if method == 'simulate' or method == 'sim':
+                if method[:3] == 'sim':
+                    drifts *= accumulator.dt
+                    sigma_dv = params['sigma_dv'] * np.sqrt(orig_dt)
                     sigma_dv = np.array([sigma_dv, sigma_dv])
 
                 # calculate cdf and pdfs using signed drift rates now
-                accumulator.set_drifts(list(drifts), hdgs)
-                accumulator.dist(return_pdf=return_wager)
+                
+                if drifts.ndim == 2:
+                    drifts_list = [drifts[:, i:i+1] for i in range(drifts.shape[1])]
+                else:
+                    drifts_list = drifts.tolist()
+                accumulator.set_drifts(drifts_list, hdgs)
+
+                # don't need to run this if simulating dv!
+                if method[:3] != 'sim':
+                    accumulator.dist(return_pdf=return_wager)
 
                 for h, hdg in enumerate(hdgs):
                     trial_index = (data['modality'] == mod) & (data['coherence'] == coh) & \
@@ -260,10 +372,10 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                     if trial_index.sum() == 0:
                         continue
 
-                    if method == 'simulate' or method == 'sim':
+                    if method[:3] == 'sim':
                         these_trials = np.where(trial_index)[0]
 
-                        non_dec_time = truncnorm.rvs(-2, 2, loc=params['ndt'][m], scale=params['sigma_ndt'],
+                        non_dec_time = truncnorm.rvs(ndt_min, ndt_max, loc=params['ndt'][m], scale=params['sigma_ndt'],
                                                      size=trial_index.sum())
 
                         for tr in range(trial_index.sum()):
@@ -295,13 +407,14 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                                 final_v = dv[rt_ind, choice ^ 1]
 
                             if return_wager:
-                                grid_ind = np.argmin(np.abs((accumulator.grid_vec + accumulator.bound[choice]) - final_v))
+                                
+                                grid_ind = np.argmin(np.abs(accumulator.grid_vec - final_v))
                                 # log_odds = log_odds_maps[m][rt_ind, grid_ind]
                                 wager = int(log_odds_above_threshold[m][rt_ind, grid_ind])  # lookup log odds thres
                                 #wager *= (np.random.random() > params['alpha'])  # incorporate base-rate of low bets
                                 model_data.loc[these_trials[tr], 'PDW'] = wager
 
-                            # flip choice result so that left choices = 0, right choices = 1
+                            # flip choice result so that left choices = 0, right choices = 1 in the output
                             model_data.loc[these_trials[tr], 'choice'] = choice ^ 1
 
                             # RT = decision time + non-decision time
@@ -350,7 +463,7 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                                 model_data.loc[trial_index, 'PDW'] = p_wager[0]
 
                         # ====== CHOICE ======
-                        if method == 'sample' or method == 'samp':
+                        if method[:4] == 'samp':
                             model_data.loc[trial_index, 'choice'] = \
                                 np.random.choice([1, 0], trial_index.sum(), replace=True, p=p_choice)
                         else:
@@ -359,17 +472,20 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                         # ====== RT ======
 
                         # convolve model RT distribution with non-decision time
-                        ndt_dist = norm.pdf(accumulator.tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
+                        ndt_dist = norm.pdf(orig_tvec, loc=params['ndt'][m], scale=params['sigma_ndt'])
                         rt_dist = np.squeeze(accumulator.rt_dist[h, :])
+                        
+                        eps = np.finfo(np.float64).eps
+                        rt_dist[rt_dist<eps] = eps
                         rt_dist = convolve(rt_dist, ndt_dist / ndt_dist.sum())
-                        rt_dist = rt_dist[:len(accumulator.tvec)]
-                        rt_dist /= rt_dist.sum()
+                        rt_dist = rt_dist[:len(accumulator.tvec)]  
+                        rt_dist /= rt_dist.sum()  # renormalize
 
                         # given RT distribution,
                         #   sample from distribution (generating fake RTs) if method == 'sample'
                         #   or store probability of observed RTs, if method == 'probability'
 
-                        if method == 'sample' or method == 'samp':
+                        if method[:4] == 'samp':
                             model_data.loc[trial_index, 'RT'] = \
                                 np.random.choice(accumulator.tvec, trial_index.sum(), replace=True, p=rt_dist)
                         else:
@@ -377,15 +493,16 @@ def ddm_2d_generate_data(params: dict, data: pd.DataFrame(),
                                 actual_rts = data.loc[trial_index, 'RT'].values
                                 dist_inds = [np.argmin(np.abs(accumulator.tvec - rt)) for rt in actual_rts]
                                 model_data.loc[trial_index, 'RT'] = rt_dist[dist_inds]
+                                # NOTE in this case we save the likelihood values, not an RT value!
                             else:
-                                # check that data doesn't contain RT column
+                                # check that data doesn't contain RT column?
                                 if rt_method == 'mean':
                                     model_data.loc[trial_index, 'RT'] = (accumulator.tvec * rt_dist).sum() # expected value
                                 elif rt_method == 'max':
                                     model_data.loc[trial_index, 'RT'] = accumulator.tvec[np.argmax(rt_dist)]
 
     # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
-    if method == 'probability' or method == 'prob':
+    if method[:4] == 'prob':
 
         model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=0, value=1e-10)
         model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=1, value=1 - 1e-10)
@@ -435,3 +552,24 @@ def _intersection_from_margconds(a_given_b, prob_a, prob_b):
 
     return prob_ab, b_given_a
 
+
+
+def get_stim_urg(tvec: np.ndarray = None, pos: np.ndarray = None, moment=1):
+
+    if pos is None:
+        ampl = 0.16  
+        # pos = norm.cdf(tvec, 0.9, 0.3) * ampl
+        pos = skewnorm.cdf(tvec, 2, 0.8, 0.4) * ampl # emulate tf
+    
+    vel = np.gradient(pos)
+    acc = np.gradient(vel)
+    
+    vel /= vel.max()
+    acc /= acc.max()
+
+    if moment == 1 or moment == 'vel':
+        return vel        
+
+    elif moment == 2 or moment == 'acc':
+        return acc
+        
