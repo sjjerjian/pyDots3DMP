@@ -43,19 +43,19 @@ def main():
 
     # initial parameter 'guesses'
     init_params = {
-        'kmult': [0.3, 0.4],
-        'bound': [0.6, 1, 1],
+        'kmult': [0.8, ],
+        'bound': [0.5, 1, 1],
         'ndt': .15, 
         'sigma_ndt': 0.05,
     }
     
-    lb = np.array([0.05, 0.4, 0.4, 0.4, 0.05, 0.0])
-    ub = np.array([10, 5, 5, 5, 0.4, 0.1])
+    lb = np.array([0.05, 0.05, 0.2, 0.2, 0.2, 0.05, 0.0])
+    ub = np.array([10, 10, 5, 5, 5, 0.4, 0.1])
     
-    plb = np.array([0.1, 0.5, 0.5, 0.5, 0.1, 0.03])
-    pub = np.array([5, 3, 3, 3, 0.3, 0.06])
+    plb = np.array([0.1, 0.1, 0.3, 0.3, 0.3, 0.1, 0.03])
+    pub = np.array([5, 5, 3, 3, 3, 0.3, 0.06])
     
-    fixed = np.array([0, 0, 0, 0, 0, 1])
+    fixed = np.array([0, 0, 0, 0, 0, 0, 1])
     
     # bads_result = run_bads(init_params, data_delta0, accum, fixed=fixed, bounds=(lb, ub, plb, pub), outputs=['choice', 'RT'], llh_scaling=[1, 1])
     # result_to_json(bads_result, "../../data/lucio_bads_result_noPDW.json")
@@ -64,12 +64,12 @@ def main():
     # fitted_params['sigma_ndt'] = init_params['sigma_ndt']
         
     # for plotting arbitrary parameters, without a fit result
-    # fitted_params = {
-    #     'kmult': [0.3, 0.4],
-    #     'bound': [0.6, 1, 1],
-    #     'ndt': .15, 
-    #     'sigma_ndt': 0.001,
-    # }
+    fitted_params = {
+        'kmult': [0.8, 1.5],
+        'bound': [0.3, 0.5, 0.5],
+        'ndt': .2, 
+        'sigma_ndt': 0.05,
+    }
     
     model_data = model_predictions(fitted_params, accum, num_hdgs=11, return_wager=False)
     model_data_delta0 = model_data.loc[model_data['delta']==0, :].pipe(replicate_ves)
@@ -81,7 +81,6 @@ def main():
     # init_params2['sigma_ndt'] = init_params['sigma_ndt']  # fix back at original (since it will have changed under the hood)
     # init_params2['theta'] = [0.8, 0.8, 0.8]
     # init_params2['alpha'] = 0.05
-    # TODO set bounds here
 
     # lb = np.array([0.1, 0.1, 0.1, 0.1, 0.3, 0.3, 0.1, 0.1, 0.1, 0])
     # ub = np.array([2, 2, 1, 1, 2, 2, 0.4, 0.4, 0.4, 0.15])

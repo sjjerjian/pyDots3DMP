@@ -156,7 +156,9 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
        (assume there is already a dataset with actual observed choices, RTs, and wagers)
     :param params: parameters dictionary
     :param data: dataframe, containing modality, coherence, heading, delta
-    :param accumulator:
+    :param accum_kw: dictionary keyword argumens for base accumulator instance
+    :param rt_method:
+    :param save_dv: boolean = False
     :param method: 'sim[ulate]', 'samp[le]', or 'prob[ability]'
     :param return_wager: True or False
     :param save_dv: True or False, only relevant if method == 'simulate'
@@ -181,6 +183,7 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
     orig_tvec = accumulator.tvec
     
     accumulator.set_bound(params['bound'])
+    
     
     if isinstance(params['ndt'], (int, float)):
         params['ndt'] = [params['ndt']] * len(mods)
@@ -224,9 +227,9 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
 
         for m, mod in enumerate(mods):
             
-            if len(accumulator.bound) == 3:
+            if len(params['bound']) == 3:
                 accumulator.set_bound(params['bound'][m])
-
+                print(accumulator.bound)
             if mod == 1:
                 # Drugo 2014 supplementary materials:
                 # passage of time is now the cumulative sensitivity of the stimulus
@@ -294,8 +297,9 @@ def generate_data(params: dict, data: pd.DataFrame(), accum_kw: dict,
     print('generating model results')
     for m, mod in enumerate(mods):
         
-        if len(accumulator.bound) == 3:
-                accumulator.set_bound(params['bound'][m])
+        if len(params['bound']) == 3:
+            accumulator.set_bound(params['bound'][m])
+            print(accumulator.bound)
         
         ndt_min = params['ndt'][m] / 2
         ndt_max = params['ndt'][m] + ndt_min
