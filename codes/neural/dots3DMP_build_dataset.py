@@ -86,7 +86,21 @@ def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
 
 # %% ----------------------------------------------------------------
 # buld pseudopopulation (concatenated sessions)
-# TODO decorator to split by areas
+
+def split_pseudopop_by_area(create_pp_func):
+    def wrapper(*args, **kwargs):
+        
+        pseudopop = create_pp_func(*args, **kwargs)
+        areas = pseudopop.get_unique_areas()
+        
+        area_pseudopops = {k: [] for k in areas}
+        for area in areas:
+            area_pseudopops[area] = pseudopop.filter_units(pseudopop.area == area)
+            
+        return area_pseudopops
+    return wrapper
+
+@split_pseudopop_by_area
 def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None, 
                     event_time_groups: list = None,
                     return_averaged=True) -> PseudoPop:
