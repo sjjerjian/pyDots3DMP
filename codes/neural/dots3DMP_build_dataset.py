@@ -6,9 +6,10 @@ from pathlib import Path, PurePath
 import scipy.io as sio
 import pickle as pkl
 from neural.NeuralDataClasses import Population, ksUnit, PseudoPop
-from neural.rate_utils import concat_aligned_rates
+from neural.rate_utils import concat_aligned_rates, condition_averages
 
-# %% build Population class
+# %% ----------------------------------------------------------------
+# build Population class
 
 def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
 
@@ -84,24 +85,24 @@ def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
 
     return rec_popn
 
-
-def build_pseudopop(popn_dfs, tr_tab, 
-                    t_params: dict, smooth_params: dict = None,
+# %% ----------------------------------------------------------------
+# buld pseudopopulation (concatenated sessions)
+# TODO decorator to split by areas
+def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None, 
+                    event_time_groups: list = None,
                     return_averaged=True) -> PseudoPop:
 
-    # if smooth_params is None:
-    #     params = {'type': 'boxcar', 'binsize': 0.05, 'width': 0.2, 'sigma': 0.05}
-
-    # calculate firing rates on each trial, given PSTH parameters
     fr_list, unitlabels, conds_dfs, tvecs, _ = zip(*popn_dfs.apply(
         lambda x: x.get_firing_rates(align_ev=t_params['align_ev'], trange=t_params['trange'],
                                      binsize=t_params['binsize'], sm_params=smooth_params,
                                      condlabels=tr_tab.columns)
         )
     )
-
+    
+    num_sessions, num_alignments = len(fr_list), len(fr_list[0])
+    
     if return_averaged:
-        if binsize == 0:
+        if t_params['binsize'] == 0:
             rates_cat, _, len_intervals = concat_aligned_rates(fr_list)
         else:
             rates_cat, _, len_intervals = concat_aligned_rates(fr_list, tvecs)
@@ -116,22 +117,33 @@ def build_pseudopop(popn_dfs, tr_tab,
 
         # resplit by len_intervals, for pseudopop creation
         fr_list = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], cond_frs, len_intervals))
-
-        # re-assign conds_dfs to unique conditions, just keep the first one since they are all the same!
-        conds_dfs = cond_groups[0]
+       
+    # overwrite conds_dfs with unique conditions lists, instead of individual trials
+    conds_dfs = cond_groups
 
     # TODO assign relative event times (median?) for each unit/session somwehere in pseudopop!!
     if 'other_ev' in t_params:
-        rel_event_times = popn_dfs.apply(lambda x: x.popn_rel_event_times(
-                        align=t_params['align_ev'], others=t_params['other_ev']))
-            
+        
+        cg_events = None
+        if return_averaged:
+            if event_time_groups:
+                cg_events = tr_tab[event_time_groups].drop_duplicates()
+            else:
+                cg_events = tr_tab
+        rel_event_times = popn_dfs.apply(
+            lambda x: x.popn_rel_event_times(align=t_params['align_ev'],
+                                             others=t_params['other_ev'],
+                                             cond_groups=cg_events
+                                            )
+                                         )
+        
+        
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
     # stack firing rates, along unit axis, with insertion on time axis according to t_idx
     num_units = np.array([x[0].shape[0] for x in fr_list])
     max_trs = max(list(map(len, list(conds_dfs))))
 
-    stacked_frs = []
 
     # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
     # and insert each population fr matrix according to how its tvec lines up with t_unq
@@ -139,10 +151,10 @@ def build_pseudopop(popn_dfs, tr_tab,
     # e.g. motionOn - motionOff varies on each trial, and the limit across sessions will also vary
     # only do it if tvecs is specified, otherwise assume we are just using the interval averages
 
-    t_unq, t_idx = [], []
+    stacked_frs, t_unq, t_idx = ([], ) * 3
 
     # loop over alignments
-    for j in range(len(fr_list[0])):
+    for j in range(num_alignments):
 
         u_pos = 0
         if binsize > 0:     #tvecs is not None  # or fr_list[0][0].ndim == 2
@@ -150,7 +162,7 @@ def build_pseudopop(popn_dfs, tr_tab,
             if j==0:
                 print("time vector provided, concatenating time-resolved firing rates into pseudo-population\n")
 
-            concat_tvecs = [tvecs[i][j] for i in range(len(tvecs))]
+            concat_tvecs = [tvecs[i][j] for i in range(num_sessions)]
             t_unq.append(np.unique(np.concatenate(concat_tvecs)))
             t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
 
@@ -180,6 +192,7 @@ def build_pseudopop(popn_dfs, tr_tab,
         firing_rates=stacked_frs,
         timestamps=t_unq,
         psth_params=t_params,
+        rel_events=list(rel_event_times),
         conds=conds_dfs,
         clus_group=np.hstack(unitlabels),
         area=area,
