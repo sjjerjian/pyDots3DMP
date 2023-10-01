@@ -48,23 +48,28 @@ def concat_aligned_rates(fr_list, tvecs=None, insert_blank=False) -> tuple[Union
     
     rates_cat, tvecs_cat, len_intervals = [], [], []
     for f, t in zip(fr_list, tvecs):
-        rates_cat, tvecs_cat, len_intervals = concat_aligned_rates_single(f, tvecs=t, insert_blank=insert_blank)
+        rates_s, tvecs_s, len_s = concat_aligned_rates_single(f, tvecs=t, insert_blank=insert_blank)
+        rates_cat.append(rates_s)
+        tvecs_cat.append(tvecs_s)
+        len_intervals.append(len_s)
         
-    return 
+    return rates_cat, tvecs_cat, len_intervals
 
 
 def concat_aligned_rates_single(frs: list[np.ndarray], tvecs=None, insert_blank=False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
-    if tvecs is not None:
+    if tvecs:
         # concatenate all different alignments, but store the lens for later splits
         len_intervals = np.array(list(map(lambda x: x.size, tvecs)), dtype='int').cumsum()
-        if insert_blank:
-            rates_cat = np.concatenate((frs, np.full(frs.shape[0], frs.shape[1], 1), np.nan), axis=2)
-            tvecs_cat = np.concatenate((tvecs, np.full(tvecs.shape[0], tvecs.shape[1], 1), np.nan), axis=2)
+        if insert_blank: 
+            # TODO fix this, maybe just insert nan column after?
+            ...
+            # rates_cat = np.concatenate((frs, np.full((frs[0].shape[0], frs[0].shape[1], 1), np.nan)), axis=2)
+            # tvecs_cat = np.concatenate((tvecs, np.nan), axis=2)
         else:
             rates_cat = np.concatenate(frs, axis=2)
-            tvecs_cat = np.concatenate(tvecs, axis=2)
-           
+            tvecs_cat = np.concatenate(tvecs)
+            
     else:
         # each 'interval' is length 1, if binsize was set to 0
         rates_cat = np.dstack(frs)
