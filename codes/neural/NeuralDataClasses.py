@@ -15,6 +15,9 @@ from datetime import date
 from dataclasses import dataclass, field
 from neural.rate_utils import *
 
+from codetiming import Timer
+from collections import defaultdict
+
 # %% generic unit class
 
 
@@ -130,8 +133,8 @@ class Population:
             return self.units == other.units
         return False
 
-    def popn_rel_event_times(self, align=['stimOn'], others=['stimOff']):
-        return rel_event_times(self.events, align, others)
+    def popn_rel_event_times(self, align=['stimOn'], others=['stimOff'], cond_groups=None):
+        return rel_event_times(self.events, align, others, cond_groups)
 
     def get_firing_rates(self, *args, **kwargs):
         return calc_firing_rates(self.units, self.events, *args, **kwargs)
@@ -158,6 +161,8 @@ class PseudoPop:
     conds: tuple = field(default_factory=tuple, repr=False)
     psth_params: dict = field(default_factory=dict, repr=False)
     
+    rel_events: list[pd.DataFrame] = field(default_factory=list, repr=False)
+    
     create_date: date = date.today().strftime("%Y%m%d")
 
     # TODO add in events, and alignment times!!
@@ -179,7 +184,7 @@ class PseudoPop:
         return self
     
     
-    # TODO make sure this all works kosher
+    # TODO make sure this all works (insert_blank especially)
     def concat_alignments(self, insert_blank=True):
         
         if rates_separated:
@@ -263,11 +268,12 @@ class PseudoPop:
 # %% util functions
 
 
-def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
+def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=None):
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
 
-    reltimes = {aev: [] for aev in align}
+    reltimes = defaultdict(list)
+    # reltimes = {aev: [] for aev in align}
     for aev, oev in zip(align, others):
 
         if events.loc[good_trs, aev].isna().all(axis=0).any():
@@ -276,7 +282,20 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"]):
         align_ev = events.loc[good_trs, aev].to_numpy(dtype='float64', na_value=np.nan)
         other_ev = events.loc[good_trs, oev].to_numpy(dtype='float64', na_value=np.nan)
         reltimes[aev] = other_ev - align_ev[:, np.newaxis]
+        
+        if cond_groups is not None:
+            condlist = events.loc[good_trs, cond_groups.columns]
+            ic, nC, cond_groups = condition_index(condlist, cond_groups)
+            
+            temp = np.full((nC, reltimes[aev].shape[1]), np.nan)
+            for c in range(nC):
+                if np.sum(ic == c):
+                    temp[c, :] = np.nanmedian(reltimes[aev][ic == c], axis=0)
+            
+            reltimes[aev] = temp
 
+        reltimes[aev] = pd.DataFrame(reltimes[aev], columns=oev)
+        
     return reltimes
 
 
@@ -455,7 +474,7 @@ def smooth_counts(raw_fr, params: dict = None):
 
     return convolve1d(raw_fr, win, axis=0, mode='nearest')
 
-
+@Timer(name='calc_firing_rates_timer')
 def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
                       binsize=0.05, sm_params: dict = None,
                       condlabels=('modality', 'coherence', 'heading'),
