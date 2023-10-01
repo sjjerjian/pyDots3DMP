@@ -18,6 +18,8 @@ from neural.rate_utils import *
 from codetiming import Timer
 from collections import defaultdict
 
+from copy import deepcopy
+
 # %% generic unit class
 
 
@@ -165,23 +167,34 @@ class PseudoPop:
     
     create_date: date = date.today().strftime("%Y%m%d")
 
-    # TODO add in events, and alignment times!!
-
     def __len__(self):
         return len(self.unit_session)
 
-    # TODO custom __repr__?
-    
     def get_unique_areas(self):
         return np.unique(self.area).tolist()
+    
+    def __repr__(self):
+        return f"PseudoPop(Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self.area)}"
+    
 
-    def filter_units(self, inds):
-        self.unit_session = self.unit_session[inds]
-        self.area = self.area[inds]
-        self.clus_group = self.clus_group[inds]
-        self.firing_rates = self.unit_session[inds, ...]
+    def filter_units(self, inds: np.ndarray):
+        
+        filtered_data = deepcopy(self)
+        
+        # one entry per unit
+        filtered_data.unit_session = self.unit_session[inds]
+        filtered_data.area = self.area[inds]
+        filtered_data.clus_group = self.clus_group[inds]
+        filtered_data.firing_rates = list(map(lambda x: x[inds, ...], self.firing_rates))
+        
+        # one entry per session
+        sessions = np.unique(self.unit_session).tolist()
+        filtered_data.conds = [self.conds[s] for s in sessions]
+        
+        if self.rel_events:
+            filtered_data.rel_events =  [self.rel_events[s] for s in sessions]
 
-        return self
+        return filtered_data
     
     
     # TODO make sure this all works (insert_blank especially)

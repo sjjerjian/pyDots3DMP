@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path, PurePath
 import scipy.io as sio
+from collections import defaultdict
+
 import pickle as pkl
 from neural.NeuralDataClasses import Population, ksUnit, PseudoPop
 from neural.rate_utils import concat_aligned_rates, condition_averages
@@ -73,13 +75,10 @@ def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
     # sa = np.squeeze(np.load(PurePath(filepath, 'amplitudes.npy')))
 
     # only go through clusters in this group of chs (i.e. one probe/area)
-    # these_clus_ids = clus_info.loc[clus_info['ch'].isin(rec_info['chs']),
-    #                                'cluster_id']
+    # these_clus_ids = clus_info.loc[clus_info['ch'].isin(rec_info['chs']), 'cluster_id']
     # cgs = cgs.loc[cgs['cluster_id'].isin(these_clus_ids) & cgs['group'].isin(groups2keep), :]
 
     # for clus in cgs.itertuples():
-
-    #     # get info for this cluster
     #     clus_id = clus.cluster_id
     #     unit_info = clus_info[clus_info['cluster_id'] == clus_id].to_dict('records')[0]
 
@@ -116,12 +115,15 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
             cond_groups.append(cg)
 
         # resplit by len_intervals, for pseudopop creation
-        fr_list = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], cond_frs, len_intervals))
-       
-    # overwrite conds_dfs with unique conditions lists, instead of individual trials
-    conds_dfs = cond_groups
+        if len_intervals:
+            fr_list = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], cond_frs, len_intervals))
+        else:
+            fr_list = list(map(lambda f: np.split(f, f.shape[2], axis=2), cond_frs))
+    
+        # overwrite conds_dfs with unique conditions lists, instead of individual trials
+        conds_dfs = cond_groups
 
-    # TODO assign relative event times (median?) for each unit/session somwehere in pseudopop!!
+    rel_event_times = None
     if 'other_ev' in t_params:
         
         cg_events = None
@@ -130,13 +132,14 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
                 cg_events = tr_tab[event_time_groups].drop_duplicates()
             else:
                 cg_events = tr_tab
+                
         rel_event_times = popn_dfs.apply(
             lambda x: x.popn_rel_event_times(align=t_params['align_ev'],
                                              others=t_params['other_ev'],
                                              cond_groups=cg_events
                                             )
                                          )
-        
+        rel_event_times = list(rel_event_times)
         
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
@@ -151,13 +154,13 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
     # e.g. motionOn - motionOff varies on each trial, and the limit across sessions will also vary
     # only do it if tvecs is specified, otherwise assume we are just using the interval averages
 
-    stacked_frs, t_unq, t_idx = ([], ) * 3
+    stacked_frs, t_unq, t_idx = [], [], []
 
     # loop over alignments
     for j in range(num_alignments):
 
         u_pos = 0
-        if binsize > 0:     #tvecs is not None  # or fr_list[0][0].ndim == 2
+        if t_params['binsize'] > 0:     #tvecs is not None  # or fr_list[0][0].ndim == 2
 
             if j==0:
                 print("time vector provided, concatenating time-resolved firing rates into pseudo-population\n")
@@ -181,7 +184,7 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
                 u_pos += num_units[sess]
 
     # list of area, session number, and unit number within session, for each unit
-    area = [p.area for n, p in zip(num_units, popn_dfs) for _ in range(n)] # TODO deal with area=None
+    area = np.array([p.area for n, p in zip(num_units, popn_dfs) for _ in range(n)]) 
     u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
 
     # make conditions list the same size as units (replicate conditions list for units within the same session)
@@ -192,7 +195,7 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
         firing_rates=stacked_frs,
         timestamps=t_unq,
         psth_params=t_params,
-        rel_events=list(rel_event_times),
+        rel_events=rel_event_times,
         conds=conds_dfs,
         clus_group=np.hstack(unitlabels),
         area=area,
@@ -200,7 +203,6 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
     )
 
     return pseudo_pop
-
 
 
 # %% convert cluster group int into cluster label
