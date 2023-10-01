@@ -25,50 +25,46 @@ def concat_aligned_rates(fr_list, tvecs=None, insert_blank=False) -> tuple[Union
     so instead of having to loop over alignments, we can apply functions on all firing rates at once
     this works for a list of lists (e.g. a list of multiple recording populations
     """
-
-    # if tvecs is not None:
-    #     # concatenate all different alignments...
-    #     # but store the lens for later splits
-    #     len_intervals = [np.asarray(list(map(lambda x: x.size, t)), dtype='int').cumsum() for t in tvecs]
-    #     if insert_blank:
-    #         rates_cat = list(map(lambda x: np.concatenate((x, np.full(x.shape[0], x.shape[1], 1), np.nan),
-    #                                                       axis=2), fr_list))
-    #         tvecs_cat = list(map(lambda x: np.concatenate((x, np.full(x.shape[0], x.shape[1], 1), np.nan),
-    #                                                       axis=2), tvecs))
-    #     else:
-    #         rates_cat = list(map(lambda x: np.concatenate(x, axis=2), fr_list))
-    #         tvecs_cat = list(map(lambda x: np.concatenate(x, axis=2), tvecs))
-           
-    # else:
-    #     # each 'interval' is length 1 if binsize was set to 0
-    #     len_intervals = [np.ones(len(r), dtype=int).cumsum() for r in fr_list]
-    #     rates_cat = list(map(np.dstack, fr_list))
-
-    # return rates_cat, tvecs_cat, len_intervals
     
-    rates_cat, tvecs_cat, len_intervals = [], [], []
-    for f, t in zip(fr_list, tvecs):
-        rates_s, tvecs_s, len_s = concat_aligned_rates_single(f, tvecs=t, insert_blank=insert_blank)
-        rates_cat.append(rates_s)
-        tvecs_cat.append(tvecs_s)
-        len_intervals.append(len_s)
+    if tvecs:
+        rates_cat, tvecs_cat, len_intervals = [], [], []
         
+        for f, t in zip(fr_list, tvecs):
+            rates_s, tvecs_s, len_s = concat_aligned_rates_single(f, tvecs=t, insert_blank=insert_blank)
+            rates_cat.append(rates_s)
+            tvecs_cat.append(tvecs_s)
+            len_intervals.append(len_s)
+            
+    else:
+        # # each 'interval' is length 1 if binsize was set to 0,
+        # # and can simply 'dstack' each sessions rates
+        
+        rates_cat = list(map(np.dstack, fr_list))
+        tvecs_cat = None
+        len_intervals = None
+
+        # rates_cat, tvecs_cat, len_intervals = [], None, None
+        # for f in fr_list:
+        #     rates_s, _, _ = concat_aligned_rates_single(f)
+        #     rates_cat.append(rates_s)
+            
+
     return rates_cat, tvecs_cat, len_intervals
+
 
 
 def concat_aligned_rates_single(frs: list[np.ndarray], tvecs=None, insert_blank=False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     if tvecs:
+        rates_cat = np.concatenate(frs, axis=2)
+        tvecs_cat = np.concatenate(tvecs)
+        
         # concatenate all different alignments, but store the lens for later splits
         len_intervals = np.array(list(map(lambda x: x.size, tvecs)), dtype='int').cumsum()
-        if insert_blank: 
-            # TODO fix this, maybe just insert nan column after?
-            ...
-            # rates_cat = np.concatenate((frs, np.full((frs[0].shape[0], frs[0].shape[1], 1), np.nan)), axis=2)
-            # tvecs_cat = np.concatenate((tvecs, np.nan), axis=2)
-        else:
-            rates_cat = np.concatenate(frs, axis=2)
-            tvecs_cat = np.concatenate(tvecs)
+        
+        if insert_blank:
+            # use lens to insert NaN columns at appropriate positions
+            raise NotImplementedError
             
     else:
         # each 'interval' is length 1, if binsize was set to 0
