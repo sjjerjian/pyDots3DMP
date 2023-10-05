@@ -1,39 +1,30 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-# from scipy.stats import vonmises
+from typing import Optional
 from scipy.optimize import curve_fit
 from scipy.special import i0
-from scipy.stats import f_oneway, kruskal, ttest_rel, ttest_1samp, wilcoxon
+from scipy.stats import (
+    f_oneway, kruskal, ttest_rel, ttest_1samp, wilcoxon, vonmises
+)
 
 from neural.rate_utils import condition_index
 
 
 # %% simple tuning statistics
 
-def tuning_within(f_rates: np.ndarray, condlist, cond_groups=None, 
-                  cond_cols=None, tuning_col: str = 'heading',
-                  parametric=True):
+def tuning_within(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame], 
+                  tuning_col: str = 'heading', parametric: bool = True):
     """
-    tuning within each time bin/interval (across conditions e.g. heading)
+    tuning within each time bin/interval (across tuning_col, with each cond_group in cond_groups)
     """
-
-    # this could be a little circular, since we call condition_index again below
-    if cond_groups is None:
-        _, _, cond_groups = condition_index(condlist)
     
-    if parametric:
-        stat_func = f_oneway
-    else:
-        stat_func = kruskal
+    stat_func = f_oneway if parametric else kruskal
 
-    if cond_cols is None:
-        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
+    ic, nC, cg = condition_index(condlist[cond_cols], cond_groups)
 
-    cg = cond_groups[cond_cols].drop_duplicates()
-    ic, nC, cg = condition_index(condlist[cond_cols], cg)
-
-    # result is units x conditions x time
+    #f_stat and p_val results are units x conditions x time
     f_stat = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
     p_val = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
 
@@ -54,21 +45,17 @@ def tuning_within(f_rates: np.ndarray, condlist, cond_groups=None,
     return f_stat, p_val, cg
 
 
-def tuning_across(f_rates: np.ndarray, condlist, cond_groups=None,
-                  cond_cols=None, tuning_col: str = 'heading', 
-                  bsln_t=0, abs_diff=True, parametric=True):
+def tuning_across(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame],
+                  tuning_col: str = 'heading', 
+                  bsln_t=0, abs_diff: bool = True, parametric: bool = True):
     """
     tuning at each time/interval, relative to a baseline time, across conditions
     """
     
-    if cond_groups is None:
-        _, _, cond_groups = condition_index(condlist)
-    
-    if cond_cols is None:
-        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
+    # if cond_cols is None:
+    #     cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
 
-    cg = cond_groups[cond_cols].drop_duplicates()
-    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+    ic, nC, cg = condition_index(condlist, cond_groups)
 
     # result is units x conditions x time
     stats = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)

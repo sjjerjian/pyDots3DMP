@@ -11,14 +11,14 @@ from scipy.ndimage import convolve1d
 from scipy.signal import gaussian
 from sklearn.metrics import roc_auc_score, roc_curve, auc
 
-from typing import Union
+from typing import Union, Optional
 
 # in all functions,
 #    f_rates denotes a unit x trial x time numpy array of firing rates
 #    fr_list denotes a list of f_rates arrays, one per interval/alignment
 
 
-def concat_aligned_rates(fr_list, tvecs=None, insert_blank=False) -> tuple[Union[list, tuple], Union[list, tuple]]:
+def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray], insert_blank: bool = False) -> tuple[Union[list, tuple], Union[list, tuple]]:
     """
     given multiple f_rates matrices stored in a list (e.g. different alignments),
     stack them.
@@ -53,9 +53,9 @@ def concat_aligned_rates(fr_list, tvecs=None, insert_blank=False) -> tuple[Union
 
 
 
-def concat_aligned_rates_single(frs: list[np.ndarray], tvecs=None, insert_blank=False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray], insert_blank: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
-    if tvecs:
+    if tvecs is not None:
         rates_cat = np.concatenate(frs, axis=2)
         tvecs_cat = np.concatenate(tvecs)
         
@@ -75,7 +75,7 @@ def concat_aligned_rates_single(frs: list[np.ndarray], tvecs=None, insert_blank=
     return rates_cat, tvecs_cat, len_intervals
 
 
-def mask_low_firing(f_rates: np.ndarray, minfr=0) -> np.ndarray:
+def mask_low_firing(f_rates: np.ndarray, minfr: int = 0) -> np.ndarray:
 
     # TODO find a way to not exclude units not recorded in all conditions!
     mean_fr = np.squeeze(np.nanmean(f_rates, axis=1)) # across conditions
@@ -87,7 +87,7 @@ def mask_low_firing(f_rates: np.ndarray, minfr=0) -> np.ndarray:
 
 # %% trial condition helpers
 
-def condition_index(condlist: pd.DataFrame, cond_groups=None) -> tuple[np.ndarray, int, pd.DataFrame]:
+def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]) -> tuple[np.ndarray, int, pd.DataFrame]:
     """
     given a single trial conditions list, and a unique set of conditions,
     return the trial index for each condition
@@ -110,7 +110,7 @@ def condition_index(condlist: pd.DataFrame, cond_groups=None) -> tuple[np.ndarra
     return ic, nC, cond_groups
 
 
-def condition_averages(f_rates, condlist, cond_groups=None) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+def condition_averages(f_rates, condlist, cond_groups: Optional[pd.DataFrame]) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """
     calculate condition-averaged firing rates
     f_rates: single trial firing rates [units x trials x time/interval]
@@ -135,15 +135,28 @@ def condition_averages(f_rates, condlist, cond_groups=None) -> tuple[np.ndarray,
     return cond_fr, cond_sem, cond_groups
 
 
-def outcome_prob(f_rates: np.ndarray,
-                 condlist, 
-                 cond_groups=None, cond_cols=None, outcome_col='choice') -> np.ndarray:
+def outcome_prob(f_rates: np.ndarray, condlist: pd.DataFrame, 
+                 cond_groups: Optional[pd.DataFrame], cond_cols=None, outcome_col: str = 'choice') -> tuple[np.ndarray, pd.DataFrame]:
+    """
+    Calculate the outcome probability given firing rates
+    if outcome_col is 'choice', this will give the choice probabilities
+
+    Args:
+        f_rates (np.ndarray): single trial firing rates, units x trials x time
+        condlist (pd.DataFrame): _description_
+        cond_groups (pd.DataFrame, optional): _description_. Defaults to None.
+        cond_cols (_type_, optional): _description_. Defaults to None.
+        outcome_col (str, optional): _description_. Defaults to 'choice'.
+
+    Returns:
+        tuple[np.ndarray, pd.DataFrame]: _description_
+    """
     
+    # TODO allow cond_groups to be None, and calculate out_prob without consideration of grouping
     if cond_cols is None:
         cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(outcome_col)]
         
-    cg = cond_groups[cond_cols].drop_duplicates()
-    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+    ic, nC, cg = condition_index(condlist[cond_cols], cond_groups)
 
     # result is units x conditions x time
     out_prob = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)

@@ -312,14 +312,15 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=No
     return reltimes
 
 
-def trial_psth(spiketimes, align, trange = np.array([np.float64, np.float64]),
-               binsize=0.05, sm_params: dict = None,
-               all_trials=False, normalize: bool = True):
+def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
+               trange = np.array([np.float64, np.float64]),
+               binsize: float = 0.05, sm_params: dict = None,
+               all_trials: bool = False, normalize: bool = True) -> tuple[np.ndarray, np.ndarray, list]:
     """
-    Parameters
+    Args:
     ----------
-    spiketimes : numpy array
-        1-D numpy array, containing the time of each spike for one unit.
+        spiketimes : numpy array
+            1-D numpy array, containing the time of each spike for one unit.
     align : numpy array
         the times of the desired event(s) spikes should be aligned to,
         1 row per trial. Units should match spiketimes
