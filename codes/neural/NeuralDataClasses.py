@@ -59,48 +59,39 @@ class Unit:
     def ccf(self, other, binsize=0.02, maxlag=2):
         ...
 
-    def mean_wf(self):
-        ...
-
-    # def summary(self, binsize=0.01, max=0.2, plot=False):
-    #  isi, corr, ifr, wf_width 2x2 subplots
-
-
-# %% Unit subclass for kilosort data
-
-@dataclass
-class ksUnit(Unit):
-    """
-    a unit extracted from Kilosort, should have a template with amplitude
-    also cluster information, and lab/rig specific info
-    """
-
-    # TODO
-    # wfs: np.ndarray = field(repr=False, default_factory=lambda:
-    #    np.zeros(shape=int, dtype=np.float64))
-    # template: np.ndarray = field(repr=False, default_factory=lambda:
-    #    np.zeros(shape=int, dtype=np.float64))
-
-    unique_id: int = field(init=False)
-    temp_amp: float = np.nan
-
-    channel: int = 0
-    depth: int = field(default=0, metadata={'unit': 'mm'})
-    rec_set: int = 1
-
-    # TODO something doesn't work here - unique_id isn't being recognized as an attribute
-    # def __post_init__(self):
-    #     self.unique_id = \
-    #         int(f"{self.rec_date}{self.rec_set:02d}{self.clus_id:03d}")
-
-    # TODO add contam pct
-
     def raster_plot(self, align, condlist, col, hue, **kwargs):
         fig, ax = plot_raster(self.spiketimes, align, condlist, col, hue, **kwargs)
         return fig, ax
 
 
-# %% Population class (simultaneously recorded, storing individual spiketimes)
+# %% ----------------------------------------------------------------
+# Unit subclass for Kilosort results
+
+@dataclass
+class ksUnit(Unit):
+  
+    # TODO add templates, amps, waveforms etc
+    
+    rec_set: int = 1
+
+    channel: int = 0
+    depth: int = field(default=0, metadata={'unit': 'mm'})
+
+    clus_id: int = 0
+    clus_group: int = 0
+    clus_label: str = ''
+    
+    unique_id: int = field(init=False)
+
+    def __post_init__(self):
+        self.unique_id = int(f"{self.rec_date}{self.rec_set:02d}{self.clus_id:03d}")
+
+
+# %% ----------------------------------------------------------------
+# Spiking Population class (simultaneously recorded, storing individual spiketimes)
+
+# THis should be SpikePop, then we have RatePop and PseudoPop
+# functions/methods? to convert SpikePop to RatePop and RatePop to PseuudoPop (stack)
 
 @dataclass
 class Population:
@@ -108,6 +99,7 @@ class Population:
     # recording metadata
     rec_date: date = date.today().strftime("%Y%m%d")
     create_date: date = date.today().strftime("%Y%m%d")
+    
     subject: str = ''
     session: str = ''
     rec_set: int = 1
@@ -142,42 +134,54 @@ class Population:
         return calc_firing_rates(self.units, self.events, *args, **kwargs)
 
 
-@dataclass
-class PseudoPop:
-    """processed firing rates and events data from one or more recordings"""
+#%% ----------------------------------------------------------------
+# Population class with binned firing rates (can be a single recording, or multiple (stacked) )
 
-    # firing rates will be numpy array units x 'trials'/conditions x time
+@dataclass
+class RatePop:
+    """processed firing rates and events data from one or more recordings"""
 
     subject: str
     
-    area: np.ndarray = field(repr=False)
-    unit_session: np.ndarray = field(repr=False)
+    # single array, one element per unit
+    area: np.ndarray[str] = field(repr=False)
     clus_group: np.ndarray = field(repr=False, metadata={1: 'MU', 2: 'SU'})
+    unit_session: np.ndarray = field(default=None, repr=False)
 
     # one list entry per alignment event
-    firing_rates: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'spikes/sec'})
+    # each element within firing rates will be units x 'trials'/conditions x time array
+    firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
     
-    rates_separated: bool = True
-
-    conds: tuple = field(default_factory=tuple, repr=False)
+    rates_separated: bool = field(default=True, repr=False)
     psth_params: dict = field(default_factory=dict, repr=False)
-    
+
+    # one entry per session
+    conds: tuple = field(default_factory=tuple, repr=False)    
     rel_events: list[pd.DataFrame] = field(default_factory=list, repr=False)
     
     create_date: date = date.today().strftime("%Y%m%d")
 
     def __len__(self):
         return len(self.unit_session)
+    
+    def __repr__(self):
+        return f"PseudoPop(Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self)}"
 
     def get_unique_areas(self):
         return np.unique(self.area).tolist()
     
-    def __repr__(self):
-        return f"PseudoPop(Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self.area)}"
-    
-
     def filter_units(self, inds: np.ndarray):
+        """
+        Filter units in pseudopop, using inds
+        use cases: extracting single units, extracting tuned units, units from one area
+
+        Args:
+            inds (np.ndarray): array of indices of desired units to keep 
+
+        Returns:
+            filtered_data (PseudoPop): A sub-selected version of original PseudoPop, with just the units in inds
+        """
         
         filtered_data = deepcopy(self)
         
