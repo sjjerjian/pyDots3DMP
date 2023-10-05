@@ -5,6 +5,8 @@ Created on Thu Apr 13 08:37:40 2023
 
 @author: stevenjerjian
 """
+# %% ----------------------------------------------------------------
+# imports 
 
 import numpy as np
 import pandas as pd
@@ -18,21 +20,19 @@ from neural.rate_utils import *
 from codetiming import Timer
 from collections import defaultdict
 
+from typing import Union
 from copy import deepcopy
 
-# %% generic unit class
+import seaborn as sns
+from cycler import cycler
 
+# %% ----------------------------------------------------------------
+# base unit class
 
 @dataclass
 class Unit:
 
     spiketimes: np.ndarray = field(repr=False)
-    amps: np.ndarray = field(repr=False)
-
-    clus_id: int = field(default=0)
-    clus_group: int = 0
-    clus_label: str = ''
-
     rec_date: date = date.today().strftime("%Y%m%d")
 
     def __len__(self):
@@ -294,7 +294,6 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=No
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
 
     reltimes = defaultdict(list)
-    # reltimes = {aev: [] for aev in align}
     for aev, oev in zip(align, others):
 
         if events.loc[good_trs, aev].isna().all(axis=0).any():
@@ -354,10 +353,9 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     x : numpy array
         if binsize>0, 1-D array containing the mid-time of each histogram bin
         otherwise, 1-D array of total time duration of each trial interval
-    spktimes_aligned : list
-        list of numpy arrays, containing individual spike times on each trial,
-        relative to alignment event. Useful for plotting spike rasters
-
+        spktimes_aligned : list
+            list of numpy arrays, containing individual spike times on each trial,
+            relative to alignment event. Useful for plotting spike rasters
     """
 
     nTr = align.shape[0]
@@ -483,9 +481,7 @@ def smooth_counts(raw_fr, params: dict = None):
 
         alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
         win = gaussian(N, std=alpha)
-        # win /= np.sum(win)  # win is already normalized to win in scipy
-
-        # smoothed_fr = gaussian_filter1d(raw_fr, sigma=alpha)
+        # win /= np.sum(win)  # win is already normalized in scipy
 
     elif params['type'] == 'CHG':  # causal half-gaussian
 
@@ -495,6 +491,7 @@ def smooth_counts(raw_fr, params: dict = None):
         win /= np.sum(win)  # re-normalize here
 
     return convolve1d(raw_fr, win, axis=0, mode='nearest')
+
 
 @Timer(name='calc_firing_rates_timer')
 def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
@@ -533,9 +530,8 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
     align_arr = np.concatenate(align_lst)
 
     unitlabels = np.array([u.clus_group for u in units])
-    # unit_ids  = np.array([u.clus_id for u in popn.units])
 
-    # return an xarray Dataset
+    # return an xarray Dataset, or separate variables
     if return_ds:
         arr = xr.DataArray(np.concatenate(rates, axis=2),
                            coords=[unitlabels,
@@ -552,20 +548,39 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         return ds
 
     else:
-        # return separate vars
         return rates, unitlabels, condlist, tvecs, align_lst
     
 
 # %% PLOTTING UTILITY FUNCTIONS
 
-# TODO add separate function just for plotting psths, with multiple alignments possible
-# this could be overlapping with the function for plotting psths for population...
+def plot_psth(fr_list, tvecs, condlist, row: str = 'modality', col: str ='coherence',
+              hue: str = 'heading', **fig_kwargs):
+    
+    ...
+    print('stop here')
+    
+    # g = sns.FacetGrid(condlist, row=row, col=col, hue=hue, sharey=True,
+    #                   **fig_kwargs)
+    
+    # # def plot_cond_fr(data, **kwargs):
+    # #     ax = plt.gca()
+    # for ax_key, ax in g.axes_dict.items():
+    #     print(ax_key)
+    #     cond_inds = condlist.loc[(condlist[row]==ax_key[0]) & (condlist[col]==ax_key[1]), :].index.values
+    #     cond_fr = f_rates[:, cond_inds, :]
+        
+    #     ax.plot(np.mean(cond_fr, axis=0))
+        
+    # TODO to be completed. maybe just make this a (class) method directly??
+         
 
 def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFrame, col: str, hue: str,
-                titles=None, suptitle: str = '', align_label='',
-                other_evs=None, other_ev_labels=None,  # TODO, not yet implemented
+                titles=None, suptitle: str = '', align_label: str = '',
                 trange: np.ndarray = np.array([-2, 3]),
                 cmap=None, hue_norm=(-12, 12), binsize: int = 0.05, sm_params: dict = None):
+
+    # TODO plot other events relative to alignment
+    # TODO allow further sort within cond by user-specified input e.g. RT
 
     if sm_params is None:
         sm_params = dict()
@@ -578,8 +593,7 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
         align += 0.3
 
     fr, x, df['spks'] = trial_psth(spiketimes, align, trange,
-                                           binsize=binsize,
-                                           sm_params=sm_params)
+                                   binsize=binsize, sm_params=sm_params)
 
     # if col is a list (i.e. 1 or more conditions), create a new grouping
     # column with unique condition groups. otherwise, just use that column
@@ -612,17 +626,14 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
     for c, cond_df in df.groupby('grp'):
 
         ctitle = cond_groups.iloc[c, :]
-        ctitle = ', '.join([f'{t}={v:.0f}' for t, v in
-                           zip(ctitle.index, ctitle.values)])
+        ctitle = ', '.join([f'{t}={v:.0f}' for t, v in zip(ctitle.index, ctitle.values)])
 
         # this time, create groupings based on hue, within cond_df
         ic, nC, cond_groups = condition_index(cond_df[[hue]])
 
-        # need to call argsort twice!
-        # https://stackoverflow.com/questions/31910407/
+        # need to call argsort twice! https://stackoverflow.com/questions/31910407/
         order = np.argsort(np.argsort(ic)).tolist()
 
-        # TODO further sort within cond by user-specified input e.g. RT
 
         # get color for each trial, based on heading, convert to list
         colors = cmap(hue_norm(cond_df[hue]).data.astype('float'))
@@ -664,15 +675,7 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
                 cond_fr[ic == hc, :].std(axis=0) / np.sum(ic == hc)
 
             ax.plot(x, cond_mean_fr[hc, :], color=cond_colors[hc, :])
-
-        # for seaborn use
-        # # set colors for unique headings, with same mapping as raster
-        # colors = cmap(hue_norm(np.unique(c_df[hue])).data.astype('float'))
-        # colors = np.split(colors, colors.shape[0], axis=0)
-        # sns.lineplot(x=c_df['time'], y=c_df['fr'],
-        #              hue=hue_group, palette=colors,
-        #              ax=ax, legend=False, errorbar=None)
-
+            
         ax.set_xlim(trange[0], trange[1])
         if c == 0:
             ax.set_ylabel('spikes/sec')
@@ -681,12 +684,7 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
             ax.set_ylabel('')
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=hue_norm)
-    # sm.set_array([])
-    # cbar_ax = fig.add_axes([0.1, 0.1, 0.05, 0.8])
-    # cbar = plt.colorbar(sm, ticks=list(uhue))
     cbar = plt.colorbar(sm)
     cbar.set_label(hue)
-
-    # plt.show()
 
     return fig, axs

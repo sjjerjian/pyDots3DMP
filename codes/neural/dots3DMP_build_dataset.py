@@ -7,26 +7,24 @@ import scipy.io as sio
 from collections import defaultdict
 
 import pickle as pkl
-from neural.NeuralDataClasses import Population, ksUnit, PseudoPop
+from neural.NeuralDataClasses import ksUnit, Population, RatePop
 from neural.rate_utils import concat_aligned_rates, condition_averages
 
 # %% ----------------------------------------------------------------
-# build Population class
+# build Population class from recorded data
 
 def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
 
     session = f"{subject}{rec_date}_{rec_info['rec_set']}"
-    # filepath = PurePath(data_folder, session)
 
     # get task timing and conditions - 'events'
     events = {**data['events'], **data['pldaps']}
-    # events = pd.DataFrame({k: pd.Series(v) for k, v in events.items()})
     events = pd.DataFrame.from_dict(events, orient='index')
     events = events.T.convert_dtypes(infer_objects=True)
     events['heading'].loc[np.abs(events['heading']) < 0.01] = 0
 
     # initialize the neural population
-    rec_popn = Population(subject=subject.upper()[0], rec_date=rec_date,
+    rec_popn = Population(subject=subject.upper(), rec_date=rec_date,
                           session=session, chs=rec_info['chs'], events=events)
 
     # add all the metadata from rec_info
@@ -62,49 +60,39 @@ def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
                           rec_date=rec_popn.rec_date, rec_set=rec_popn.rec_set)
             rec_popn.units.append(unit)
 
-    
-    # # read in cluster groups (from manual curation)
-    # cgs = pd.read_csv(PurePath(filepath, 'cluster_group.tsv'), sep='\t')
-
-    # # read cluster info
-    # clus_info = pd.read_csv(PurePath(filepath, 'cluster_info.tsv'), sep='\t')
-
-    # ss = np.squeeze(np.load(PurePath(filepath, 'spike_times.npy')))
-    # sg = np.squeeze(np.load(PurePath(filepath, 'spike_clusters.npy')))
-    # st = np.squeeze(np.load(PurePath(filepath, 'spike_templates.npy')))
-    # sa = np.squeeze(np.load(PurePath(filepath, 'amplitudes.npy')))
-
-    # only go through clusters in this group of chs (i.e. one probe/area)
-    # these_clus_ids = clus_info.loc[clus_info['ch'].isin(rec_info['chs']), 'cluster_id']
-    # cgs = cgs.loc[cgs['cluster_id'].isin(these_clus_ids) & cgs['group'].isin(groups2keep), :]
-
-    # for clus in cgs.itertuples():
-    #     clus_id = clus.cluster_id
-    #     unit_info = clus_info[clus_info['cluster_id'] == clus_id].to_dict('records')[0]
-
     return rec_popn
 
 # %% ----------------------------------------------------------------
-# buld pseudopopulation (concatenated sessions)
+# buld rate population (concatenated sessions)
 
-def split_pseudopop_by_area(create_pp_func):
-    def wrapper(*args, **kwargs):
+def split_pseudopop_by_area(pseudopop: RatePop):
+    
+    areas = pseudopop.get_unique_areas()
         
-        pseudopop = create_pp_func(*args, **kwargs)
-        areas = pseudopop.get_unique_areas()
-        
-        area_pseudopops = {k: [] for k in areas}
-        for area in areas:
-            area_pseudopops[area] = pseudopop.filter_units(pseudopop.area == area)
+    area_pseudopops = {k: [] for k in areas}
+    for area in areas:
+        area_pseudopops[area] = pseudopop.filter_units(pseudopop.area == area)
             
+    return area_pseudopops
+    
+
+def split_pseudopop_decorator(create_pp_func):
+    def wrapper(*args, **kwargs):
+        pseudopop = create_pp_func(*args, **kwargs)        
+        area_pseudopops = split_pseudopop_by_area(pseudopop)
         return area_pseudopops
     return wrapper
 
-@split_pseudopop_by_area
-def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None, 
-                    event_time_groups: list = None,
-                    return_averaged=True) -> PseudoPop:
+# @split_pseudopop_decorator  # this won't work with unstacked...
+def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None, 
+                    event_time_groups: list = None, stacked=True, return_averaged=True) -> RatePop:
+    
+    
+    num_sessions, num_alignments = len(popn_dfs), len(t_params['align_ev'])
 
+    # --------------------------------
+    # extract firing rates as unit x conditions x times, from each recording population's spiking activity
+    
     fr_list, unitlabels, conds_dfs, tvecs, _ = zip(*popn_dfs.apply(
         lambda x: x.get_firing_rates(align_ev=t_params['align_ev'], trange=t_params['trange'],
                                      binsize=t_params['binsize'], sm_params=smooth_params,
@@ -112,8 +100,8 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
         )
     )
     
-    num_sessions, num_alignments = len(fr_list), len(fr_list[0])
-    
+    # --------------------------------
+    # average trials within each condition specified in tr_tab
     if return_averaged:
         if t_params['binsize'] == 0:
             rates_cat, _, len_intervals = concat_aligned_rates(fr_list)
@@ -186,14 +174,14 @@ def build_pseudopop(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None
             stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
             for sess in range(len(fr_list)):
                 stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
-                u_pos += num_units[sess]
+                    u_pos += num_units[sess]
 
-        else:
-            if j==0:
-                print("no time provided, concatenating interval average rates into pseudo-population\n")
+            else:
+                # if j==0:
+                #     print("concatenating interval average rates into pseudo-population\n")
 
-            stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
-            for sess in range(len(fr_list)):
+                stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
+                for sess in range(len(fr_list)):
                 stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess])] = np.squeeze(fr_list[sess][j])
                 u_pos += num_units[sess]
 
@@ -232,10 +220,7 @@ def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
 # %% MAIN
 
 def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd.DataFrame:
-
-    # TODO - clean this up...make file user selectable, and remove hard-coded files
     
-    # subject = input("Enter subject:")
     subject = Path(data_file).name[0:5]
     datapath = '/Volumes/homes/fetschlab/data/'
     data_folder = Path(datapath, subject, f'{subject}_neuro/')
@@ -308,4 +293,6 @@ if __name__ == '__main__':
     rec_info_file = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/info/RecSessionInfo.xlsx'
 
     create_dataset(mat_data_file, rec_info_file)
-# %%
+    
+    
+

@@ -37,7 +37,7 @@ def tuning_within(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Opti
 
             f, p = stat_func(*y_grp, axis=1)
             
-            p[np.isnan(p)] = 1
+            p[np.isnan(p)] = .99
 
             f_stat[:, c, :] = f
             p_val[:, c, :] = p
@@ -73,7 +73,6 @@ def tuning_across(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Opti
             for t in range(y.shape[2]):
                 yt = y[:, :, t]
                 if parametric:
-
                     if abs_diff:
                         stat, p = ttest_1samp(np.abs(yt-y0), 0, axis=1)
                     else:
@@ -84,7 +83,7 @@ def tuning_across(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Opti
                     else:
                         stat, p = wilcoxon(yt, y0, axis=1)
 
-                p[np.isnan(p)] = 1
+                p[np.isnan(p)] = .99
 
                 stats[:, c, t] = stat
                 p_val[:, c, t] = p
