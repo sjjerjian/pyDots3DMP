@@ -201,11 +201,9 @@ class RatePop:
         return filtered_data
     
     
-    # TODO make sure this all works (insert_blank especially)
-    def concat_alignments(self, insert_blank=True):
+    def concat_alignments(self, insert_blank=False):
         
-        if rates_separated:
-           
+        if self.rates_separated:
             if self.psth_params['binsize'] == 0:
                 tvecs = None
                 self.concat_ints = len(self.firing_rates)
@@ -218,14 +216,18 @@ class RatePop:
             if self.psth_params['binsize'] > 0:
                 self.timestamps = concat_result[1]
                 self.concat_ints = concat_result[2]
+            self.rates_separated = False
         else:
             print("Firing rates already a single array, skipping...\n")
             
         return self       
                 
+                
     def split_alignments(self):
-        if not rates_separated:
-            self.firing_rates = np.split(self.firing_rates, self.concat_ints, axis=2)
+        if not self.rates_separated:
+            self.firing_rates = np.split(self.firing_rates, self.concat_ints, axis=2)[:-1]
+            self.timestamps = np.split(self.timestamps, self.concat_ints)[:-1]
+            self.rates_separated = True
         else:
             print("Firing rates already a list of alignments, skipping...\n")
 
@@ -244,19 +246,21 @@ class RatePop:
         if t_range is None:
             ind0, ind1 = 0, len(self.timestamps[t_int])
         else:
-            ind0 = np.argmin(self.timestamps[t_int] - t_range[0])
-            ind1 = np.argmin(self.timestamps[t_int] - t_range[1]) 
+            ind0 = np.argmin(np.abs(self.timestamps[t_int] - t_range[0]))
+            ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
         
-        if rates_separated:
-            self.concat_alignments()
-
         # subtract average baseline
-        bsln_fr = np.mean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
-        self.firing_rates -= bsln_fr  
+        bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
         
         if standardize:
-            bsln_std = np.std(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
-            self.firing_rates /= bsln_std
+            std_divide = np.nanstd(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
+        
+        if self.rates_separated:
+            self.concat_alignments()
+
+        self.firing_rates -= np.expand_dims(bsln_fr, axis=axis)
+        if standardize:
+            self.firing_rates /= np.expand_dims(std_divide, axis=axis)
         
         if return_split:
             self.split_alignments()
