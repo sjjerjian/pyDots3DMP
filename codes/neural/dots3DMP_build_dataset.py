@@ -93,6 +93,7 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
     # --------------------------------
     # extract firing rates as unit x conditions x times, from each recording population's spiking activity
     
+    # TODO alternative version which takes already saved tuple of inputs
     fr_list, unitlabels, conds_dfs, tvecs, _ = zip(*popn_dfs.apply(
         lambda x: x.get_firing_rates(align_ev=t_params['align_ev'], trange=t_params['trange'],
                                      binsize=t_params['binsize'], sm_params=smooth_params,
@@ -116,15 +117,17 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
             cond_frs.append(f_out)
             cond_groups.append(cg)
 
-        # resplit by len_intervals, for pseudopop creation
-        if len_intervals:
+        # resplit by len_intervals, for pseudopop creation (and overwrite fr_list from individual trials)
+        if t_params['binsize'] > 0:
             fr_list = list(map(lambda f, x: np.split(f, x, axis=2)[:-1], cond_frs, len_intervals))
         else:
             fr_list = list(map(lambda f: np.split(f, f.shape[2], axis=2), cond_frs))
     
-        # overwrite conds_dfs with unique conditions lists, instead of individual trials
         conds_dfs = cond_groups
 
+    # --------------------------------
+    # calculate median timing of "other events" relative to alignment event, for each session
+    
     rel_event_times = None
     if 'other_ev' in t_params:
         
@@ -253,6 +256,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
     rec_df = rec_info.copy(deep=True)
     rec_df[pars] = pd.NA
 
+    print(f"Creating neural dataset for {subject}, paradigms: {par_labels}, n = {len(data)}\n")
     for index, sess in enumerate(data):
 
         rec_date = sess['date']
@@ -270,8 +274,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
 
         for p, par in enumerate(pars):
 
-            if type(sess['data']) == dict and \
-                    par_labels[p] in sess['data'].keys():
+            if isinstance(sess['data'], dict) and par_labels[p] in sess['data'].keys():
 
                 rec_popn = build_rec_popn(
                     subject, rec_date, rec_sess_info, data=sess['data'][par_labels[p]],
@@ -281,8 +284,9 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
 
     if save_file:
         filename = f"{Path(data_file).stem}.pkl"
-        with open(filename, 'wb') as file:
-            pkl.dump(rec_df, file)
+        # with open(filename, 'wb') as file:
+        #     pkl.dump(rec_df, file)
+        rec_df.to_pickle(filename)
     
     return rec_df
 

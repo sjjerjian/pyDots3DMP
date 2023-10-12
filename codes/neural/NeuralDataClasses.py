@@ -158,7 +158,7 @@ class RatePop:
 
     # one entry per session
     conds: tuple = field(default_factory=tuple, repr=False)    
-    rel_events: list[pd.DataFrame] = field(default_factory=list, repr=False)
+    rel_events: dict[str, pd.DataFrame] = field(default_factory=dict, repr=False)
     
     create_date: date = date.today().strftime("%Y%m%d")
 
@@ -166,21 +166,22 @@ class RatePop:
         return len(self.unit_session)
     
     def __repr__(self):
-        return f"PseudoPop(Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self)}"
+        return f"Rate Pop (Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self)}"
 
     def get_unique_areas(self):
         return np.unique(self.area).tolist()
     
+    
     def filter_units(self, inds: np.ndarray):
         """
-        Filter units in pseudopop, using inds
+        Filter units in RatePop, using inds
         use cases: extracting single units, extracting tuned units, units from one area
 
         Args:
             inds (np.ndarray): array of indices of desired units to keep 
 
         Returns:
-            filtered_data (PseudoPop): A sub-selected version of original PseudoPop, with just the units in inds
+            filtered_data (RatePop): A sub-selected version of original RatePop, with just the units in inds
         """
         
         filtered_data = deepcopy(self)
@@ -236,6 +237,9 @@ class RatePop:
     
     def demean(self, t_bsln: tuple=(0, None), across_conds=True, standardize=True, return_split=True):
         
+        if not self.rates_separated:
+            self.split_alignments()
+            
         axis = 2
         if across_conds:
             axis = (1, 2)
@@ -293,7 +297,7 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=No
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
 
-    reltimes = defaultdict(list)
+    reltimes = {k: [] for k in align}
     for aev, oev in zip(align, others):
 
         if events.loc[good_trs, aev].isna().all(axis=0).any():
@@ -318,10 +322,11 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=No
         
     return reltimes
 
-
+@Timer(name='trial_psth_timer', initial_text='trial_psth ')
 def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                trange = np.array([np.float64, np.float64]),
-               binsize: float = 0.05, sm_params: dict = None,
+               binsize: float = 0.05, stepsize: Optional[float] = None, 
+               sm_params: Optional[dict] = None,
                all_trials: bool = False, normalize: bool = True) -> tuple[np.ndarray, np.ndarray, list]:
     """
     Args:
@@ -334,13 +339,16 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
         if 1-D, tstart and tend will be relative to the same event
         if 2-D, tstart will be relative to the first event, tend to the second
     trange : TYPE
-        2-length 1-D numpy array, specifying start and end time
-        relative to align_ev columns (again, units should be consistent)
-    binsize : FLOAT, optional
-        binsize for spike count histogram. The default is 0.05 (seconds).
-    sm_params : DICT, optional
-        DESCRIPTION. The default is {}.
-    all_trials : BOOLEAN, optional
+            2-length 1-D numpy array, specifying start and end time
+            relative to align_ev columns (again, units should be consistent)
+        binsize : FLOAT, optional
+            binsize for spike count histogram. The default is 0.05 (seconds) i.e. 50ms.
+        stepsize: FLOAT, optional
+            stepsize for spike count histogram. The default is None, which means == binsize
+            stepsize < binsize will yield overlapping bins
+        sm_params : DICT, optional
+            DESCRIPTION. The default is {}.
+        all_trials : BOOLEAN, optional
         DESCRIPTION. The default is False.
     normalize : BOOLEAN, optional
         normalize counts by time to obtain rate. The default is True.
@@ -400,10 +408,11 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             tstarts_new = tstart_new.repeat(tends_new.shape[0])
 
         if binsize > 0:
-
+            # TODO actually should extend here by the amount we need for the correct smoothing 
+            # TODO allow for stepsize overlap
             if trange[0] < 0 and trange[1] > 0:
                 # ensure that time '0' is in between two bins exactly
-                x0 = np.arange(0, tstart_new-binsize-1e-3, -binsize)
+                x0 = np.arange(0, tstart_new-binsize, -binsize)
                 x1 = np.arange(0, tend_new+binsize+1e-3, binsize)
                 x = np.hstack((x0[::-1, ], x1[1:, ]))
             else:
@@ -465,8 +474,10 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
         return fr_out, x, spktimes_aligned
 
 
-def smooth_counts(raw_fr, params: dict = None):
+def smooth_counts(raw_fr, params: Optional[dict] = None):
                   
+    # TODO assert raw_fr is 1d?
+    
     if params is None:
         params = {'type': 'boxcar', 'binsize': 0.02,
                   'width': 0.2, 'sigma': 0.05}
@@ -493,7 +504,7 @@ def smooth_counts(raw_fr, params: dict = None):
     return convolve1d(raw_fr, win, axis=0, mode='nearest')
 
 
-@Timer(name='calc_firing_rates_timer')
+#@Timer(name='calc_firing_rates_timer')
 def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
                       binsize=0.05, sm_params: dict = None,
                       condlabels=('modality', 'coherence', 'heading'),
@@ -522,7 +533,6 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         rates.append(np.asarray(spike_counts))
         tvecs.append(np.asarray(t_vec[0]))
 
-        # this list may be useful if constructing a large pandas dataframe and then using align_event as a hue
         if isinstance(al, str):
             al = [al]
         align_lst.append([al[0]]*len(t_vec[0]))

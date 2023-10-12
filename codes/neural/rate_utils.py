@@ -18,7 +18,7 @@ from typing import Union, Optional
 #    fr_list denotes a list of f_rates arrays, one per interval/alignment
 
 
-def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray], insert_blank: bool = False) -> tuple[Union[list, tuple], Union[list, tuple]]:
+def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray] = None, insert_blank: bool = False) -> tuple[Union[list, tuple], Union[list, tuple]]:
     """
     given multiple f_rates matrices stored in a list (e.g. different alignments),
     stack them.
@@ -26,7 +26,7 @@ def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray],
     this works for a list of lists (e.g. a list of multiple recording populations
     """
     
-    if tvecs:
+    if tvecs is not None:
         rates_cat, tvecs_cat, len_intervals = [], [], []
         
         for f, t in zip(fr_list, tvecs):
@@ -53,7 +53,7 @@ def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray],
 
 
 
-def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray], insert_blank: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray] = None, insert_blank: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     if tvecs is not None:
         rates_cat = np.concatenate(frs, axis=2)
@@ -87,7 +87,7 @@ def mask_low_firing(f_rates: np.ndarray, minfr: int = 0) -> np.ndarray:
 
 # %% trial condition helpers
 
-def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]) -> tuple[np.ndarray, int, pd.DataFrame]:
+def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame] = None) -> tuple[np.ndarray, int, pd.DataFrame]:
     """
     given a single trial conditions list, and a unique set of conditions,
     return the trial index for each condition
