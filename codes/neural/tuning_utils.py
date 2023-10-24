@@ -14,16 +14,24 @@ from neural.rate_utils import condition_index
 
 # %% simple tuning statistics
 
-def tuning_within(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame], 
-                  tuning_col: str = 'heading', parametric: bool = True):
+def tuning_within(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame] = None, 
+                  cond_cols = None, tuning_col: str = 'heading', parametric: bool = True):
     """
     tuning within each time bin/interval (across tuning_col, with each cond_group in cond_groups)
     """
     
     stat_func = f_oneway if parametric else kruskal
-
-    ic, nC, cg = condition_index(condlist[cond_cols], cond_groups)
-
+    
+    # TODO add a wrapper on condition index to handle this (or just add a third argument for cols...)
+    if cond_groups is None:
+        ic, nC, cond_groups = condition_index(condlist)
+    
+    if cond_cols is None:
+        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains('heading')]
+        
+    cg = cond_groups[cond_cols].drop_duplicates()
+    ic, nC, cg = condition_index(condlist[cond_cols], cg)
+    
     #f_stat and p_val results are units x conditions x time
     f_stat = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
     p_val = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
@@ -52,9 +60,6 @@ def tuning_across(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Opti
     tuning at each time/interval, relative to a baseline time, across conditions
     """
     
-    # if cond_cols is None:
-    #     cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(tuning_col)]
-
     ic, nC, cg = condition_index(condlist, cond_groups)
 
     # result is units x conditions x time
