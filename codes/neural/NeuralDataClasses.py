@@ -248,39 +248,60 @@ class RatePop:
             if self.psth_params['binsize'] > 0:
                 self.timestamps = concat_result[1]
                 self.concat_ints = concat_result[2]
-            self.rates_separated = False
+            self.sep_alignments = False
         else:
-            print("Firing rates already a single array, skipping...\n")
+            if warning:
+                print("Firing rates already a single array, skipping...\n")
             
         return self       
                 
                 
-    def split_alignments(self):
-        if not self.rates_separated:
+    def split_alignments(self, warning: bool = False):
+        if not self.sep_alignments:
             self.firing_rates = np.split(self.firing_rates, self.concat_ints, axis=2)[:-1]
-            self.timestamps = np.split(self.timestamps, self.concat_ints)[:-1]
-            self.rates_separated = True
+            
+            if self.psth_params['binsize'] > 0:
+                self.timestamps = np.split(self.timestamps, self.concat_ints)[:-1]
+
+            self.sep_alignments = True
         else:
-            print("Firing rates already a list of alignments, skipping...\n")
+            if warning:
+                print("Firing rates already a list of alignments, skipping...\n")
 
         return self
     
     
-    def demean(self, t_bsln: tuple=(0, None), across_conds=True, standardize=True, return_split=True):
+    def demean(self, t_int=0, t_range=None, across_conds=True, standardize=True, return_split=True):
+        """
+        t_int: interval to use as baseline - if None, use all
+        """
         
-        if not self.rates_separated:
+        if t_int is None:
+            self.concat_alignments()
+        else:
             self.split_alignments()
             
         axis = 2
         if across_conds:
             axis = (1, 2)
 
-        # get the indices
-        t_int, t_range = t_bsln
-        
-        if t_range is None:
-            ind0, ind1 = 0, len(self.timestamps[t_int])
+        if t_int is None:
+            if t_range is None:
+                ind0, ind1 = 0, len(self.timestamps)
+            else:
+                ind0 = np.argmin(np.abs(self.timestamps - t_range[0]))
+                ind1 = np.argmin(np.abs(self.timestamps - t_range[1])) 
+                
+            # subtract average baseline
+            bsln_fr = np.nanmean(self.firing_rates[:, :, ind0:ind1], axis=axis)
+            
+            if standardize:
+                std_divide = np.nanstd(self.firing_rates[:, :, ind0:ind1], axis=axis)
+            
         else:
+            if t_range is None:
+                ind0, ind1 = 0, len(self.timestamps[t_int])
+            else:
             ind0 = np.argmin(np.abs(self.timestamps[t_int] - t_range[0]))
             ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
         
@@ -303,28 +324,75 @@ class RatePop:
         return self
                 
     
-    def normalize(self, t_bsln: tuple=(0, None), across_conds=True, softmax_const=0):
-        
-        self.demean(t_bsln, return_split=False)
+    def normalize(self, t_int=0, t_range=None, across_conds: bool = True, softmax_const: int = 0):
+
+        # only separate alignments at end if they were separated to begin with
+        flag_sep = self.sep_alignments
+            
+        self.demean(t_int, t_range, across_conds=across_conds, standardize=False, return_split=False)
         
         axis = 2
         if across_conds:
             axis = (1, 2)
             
-        # divide by absolute max across time and conditions
-        max_fr = np.max(np.abs(self.firing_rates), axis=(1, 2))
-        self.firing_rates /= (max_fr + softmax_const)
+        # divide by absolute max across time (and conditions, if across_conds)
+        max_fr = np.nanmax(np.abs(self.firing_rates), axis=axis)
+        self.firing_rates /= np.expand_dims((max_fr + softmax_const), axis=axis)
         
-        self.split_alignments()
+        if flag_sep:
+            self.split_alignments()
     
-        return self    
-
-
+        return self   
+    
+    
+    def reindex_to_event(self, event: str = 'stimOn'):
+        
+        if self.rel_events and event in self.rel_events:
+            
+            self.timestamps_reindexed = copy(self.timestamps)
+            time_shift = self.rel_events[event].mean(axis=0).to_dict()
+            
+            for t, ev in enumerate(self.psth_params['align_ev']):
+                if ev in time_shift:
+                    self.timestamps_reindexed[t] = self.timestamps[t] + time_shift[ev]            
+                    print(f"{ev} alignment time base now relative to {event}")    
+        else:
+            print('Unable to reindex - either rel_events does not exist, or an invalid event was provided\n')
+        
+        return self     
+        
 
 # %% util functions
 
+def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: list[float], 
+                      new_values: Union[Sequence[float], float]):
+    """_summary_
 
-def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=None):
+    Args:
+        conds (pd.DataFrame): dataframe of conditions
+        columns (Sequence): sequence of strings referring to columns in conds
+        old_values (Sequence): current values of the condition
+        new_values (Union[Sequence[float], float]): values to overwrite old_values with
+
+    Returns:
+        _type_: _description_
+    """
+    
+    assert len(columns) == len(old_values)
+    if isinstance(new_values, Sequence):
+        assert len(new_values) == len(old_values)
+    
+    for col in columns:
+        for i, orig_val in enumerate(old_values):
+            if isinstance(new_values, Sequence):
+                self.conds.loc[self.conds[col] == orig_val, col] = new_values[i]
+            else:
+                self.conds.loc[self.conds[col] == orig_val, col] = new_values
+
+    return conds
+
+def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence, 
+                    cond_groups: Optional[pd.DataFrame]) -> dict:
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
 
