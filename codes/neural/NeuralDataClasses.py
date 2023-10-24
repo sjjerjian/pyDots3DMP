@@ -205,9 +205,37 @@ class RatePop:
         return filtered_data
     
     
-    def concat_alignments(self, insert_blank=False):
+    def recode_conditions(self, columns: Sequence, old_values: Sequence, new_values: Union[list, int, float]):
+        self.conds = recode_conditions(columns, old_values, new_values)
         
-        if self.rates_separated:
+        
+    def num_trials_per_unit(self, by_conds=False, cond_groups=None) -> tuple[np.ndarray, pd.DataFrame]:
+        # return the number of trials for each unique condition in the population
+        
+        self.concat_alignments()
+        
+        unit_in_trial = ~np.all(np.isnan(self.firing_rates), axis=2)
+        num_units = self.firing_rates.shape[0]
+        
+        if by_conds:
+            ic, nC, cond_groups = condition_index(self.conds, cond_groups)
+            
+            unit_trial_count = np.zeros((num_units, nC))
+            
+            for u in range(num_units):
+                unit_trial_count[u, :] = np.bincount(ic[(unit_in_trial[u, :]) & (ic>=0)])
+        else:
+            unit_trial_count = unit_in_trial.sum(axis=1)
+            
+        self.split_alignments()
+        
+        return unit_trial_count, cond_groups
+        
+        
+    
+    def concat_alignments(self, insert_blank: bool = False, warning: bool = False):
+        
+        if self.sep_alignments:
             if self.psth_params['binsize'] == 0:
                 tvecs = None
                 self.concat_ints = len(self.firing_rates)
