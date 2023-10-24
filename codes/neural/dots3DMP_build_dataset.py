@@ -83,6 +83,7 @@ def split_pseudopop_decorator(create_pp_func):
         return area_pseudopops
     return wrapper
 
+
 # @split_pseudopop_decorator  # this won't work with unstacked...
 def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None, 
                     event_time_groups: list = None, stacked=True, return_averaged=True) -> RatePop:
@@ -271,8 +272,7 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
     par_names = ['tuning', 'task', 'rf', 'ves']
     par_labels = ['dots3DMPtuning', 'dots3DMP', 'RFmapping', 'VesMapping']
 
-    # TODO keep all pars here...
-    pars = ['Tuning', 'Task']
+    pars = ['Tuning', 'Task', 'RFMapping', 'VesMapping']
 
     rec_df = rec_info.copy(deep=True)
     rec_df[pars] = pd.NA
@@ -305,11 +305,11 @@ def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd
 
     if save_file:
         filename = f"{Path(data_file).stem}.pkl"
-        # with open(filename, 'wb') as file:
-        #     pkl.dump(rec_df, file)
         rec_df.to_pickle(filename)
     
     return rec_df
+
+  
 
 
 if __name__ == '__main__':

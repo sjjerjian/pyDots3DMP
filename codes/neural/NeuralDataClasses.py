@@ -20,8 +20,8 @@ from neural.rate_utils import *
 from codetiming import Timer
 from collections import defaultdict
 
-from typing import Union
-from copy import deepcopy
+from typing import Union, Sequence
+from copy import copy, deepcopy
 
 import seaborn as sns
 from cycler import cycler
@@ -166,7 +166,7 @@ class RatePop:
     create_date: date = date.today().strftime("%Y%m%d")
 
     def __len__(self):
-        return len(self.unit_session)
+        return len(self.clus_group)
     
     def __repr__(self):
         return f"Rate Pop (Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self)}"
@@ -259,11 +259,11 @@ class RatePop:
         # subtract average baseline
         bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
         
-        if standardize:
-            std_divide = np.nanstd(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
+            if standardize:
+                std_divide = np.nanstd(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
         
-        if self.rates_separated:
             self.concat_alignments()
+
 
         self.firing_rates -= np.expand_dims(bsln_fr, axis=axis)
         if standardize:
@@ -325,7 +325,7 @@ def rel_event_times(events, align=["stimOn"], others=["stimOff"], cond_groups=No
         
     return reltimes
 
-@Timer(name='trial_psth_timer', initial_text='trial_psth ')
+#@Timer(name='trial_psth_timer', initial_text='trial_psth ')
 def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                trange = np.array([np.float64, np.float64]),
                binsize: float = 0.05, stepsize: Optional[float] = None, 
@@ -369,11 +369,12 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             relative to alignment event. Useful for plotting spike rasters
     """
 
+    # TODO IMPLEMENT STEPSIZE TO ALLOW OVERLAPPING BINS!!
+    # TODO handle nTr == 0
+
     nTr = align.shape[0]
 
-    if nTr == 0:
-        return
-    else:
+    if nTr > 0:
         if align.ndim == 2:
             align = np.sort(align, axis=1)
             ev_order = np.argsort(align, axis=1)
@@ -385,12 +386,9 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             which_ev = 0
 
         nantrs = np.any(np.isnan(align), axis=1)
-
         if np.sum(nantrs) > 0:
-            print(f'Dropping {np.sum(nantrs)} trials with missing event (NaN)')
-
+            print(f'Dropping {np.sum(nantrs)} trials with missing alignment event')
         align = align[~nantrs, :]
-
         nTr = align.shape[0]  # recalculate after bad trs removed
 
         tr_starts = align[:, 0] + trange[0]
@@ -565,27 +563,6 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
     
 
 # %% PLOTTING UTILITY FUNCTIONS
-
-def plot_psth(fr_list, tvecs, condlist, row: str = 'modality', col: str ='coherence',
-              hue: str = 'heading', **fig_kwargs):
-    
-    ...
-    print('stop here')
-    
-    # g = sns.FacetGrid(condlist, row=row, col=col, hue=hue, sharey=True,
-    #                   **fig_kwargs)
-    
-    # # def plot_cond_fr(data, **kwargs):
-    # #     ax = plt.gca()
-    # for ax_key, ax in g.axes_dict.items():
-    #     print(ax_key)
-    #     cond_inds = condlist.loc[(condlist[row]==ax_key[0]) & (condlist[col]==ax_key[1]), :].index.values
-    #     cond_fr = f_rates[:, cond_inds, :]
-        
-    #     ax.plot(np.mean(cond_fr, axis=0))
-        
-    # TODO to be completed. maybe just make this a (class) method directly??
-         
 
 def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFrame, col: str, hue: str,
                 titles=None, suptitle: str = '', align_label: str = '',

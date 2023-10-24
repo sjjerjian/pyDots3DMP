@@ -18,7 +18,8 @@ from typing import Union, Optional
 #    fr_list denotes a list of f_rates arrays, one per interval/alignment
 
 
-def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray] = None, insert_blank: bool = False) -> tuple[Union[list, tuple], Union[list, tuple]]:
+def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray],
+                         insert_blank: bool = False) -> tuple[Union[list, tuple], Union[list, tuple]]:
     """
     given multiple f_rates matrices stored in a list (e.g. different alignments),
     stack them.
@@ -36,24 +37,19 @@ def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray] 
             len_intervals.append(len_s)
             
     else:
-        # # each 'interval' is length 1 if binsize was set to 0,
-        # # and can simply 'dstack' each sessions rates
+        # each 'interval' is length 1 if binsize was set to 0,
+        # so can simply 'dstack' each sessions rates
+        # insert_blank argument is ignored
         
         rates_cat = list(map(np.dstack, fr_list))
         tvecs_cat = None
         len_intervals = None
 
-        # rates_cat, tvecs_cat, len_intervals = [], None, None
-        # for f in fr_list:
-        #     rates_s, _, _ = concat_aligned_rates_single(f)
-        #     rates_cat.append(rates_s)
-            
-
     return rates_cat, tvecs_cat, len_intervals
 
 
-
-def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray] = None, insert_blank: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray],
+                                insert_blank: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     if tvecs is not None:
         rates_cat = np.concatenate(frs, axis=2)
@@ -63,8 +59,11 @@ def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarra
         len_intervals = np.array(list(map(lambda x: x.size, tvecs)), dtype='int').cumsum()
         
         if insert_blank:
-            # use lens to insert NaN columns at appropriate positions
-            raise NotImplementedError
+            # insert NaN column at points where alignments are concatenated        
+            # add (i-1) to move along as we are updating the array within the loop!
+            for i, intvl in enumerate(len_intervals[:-1]):
+                rates_cat = np.insert(rates_cat, intvl+(i-1), np.nan, axis=2)
+                tvecs_cat = np.insert(tvecs_cat, intvl+(i-1), np.nan)
             
     else:
         # each 'interval' is length 1, if binsize was set to 0
@@ -87,7 +86,7 @@ def mask_low_firing(f_rates: np.ndarray, minfr: int = 0) -> np.ndarray:
 
 # %% trial condition helpers
 
-def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame] = None) -> tuple[np.ndarray, int, pd.DataFrame]:
+def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]) -> tuple[np.ndarray, int, pd.DataFrame]:
     """
     given a single trial conditions list, and a unique set of conditions,
     return the trial index for each condition
@@ -135,10 +134,12 @@ def condition_averages(f_rates, condlist, cond_groups: Optional[pd.DataFrame]) -
     return cond_fr, cond_sem, cond_groups
 
 
-def outcome_prob(f_rates: np.ndarray, condlist: pd.DataFrame, 
-                 cond_groups: Optional[pd.DataFrame], cond_cols=None, outcome_col: str = 'choice') -> tuple[np.ndarray, pd.DataFrame]:
+def roc_outcome(f_rates: np.ndarray, condlist: pd.DataFrame, 
+                 cond_groups: Optional[pd.DataFrame], cond_cols=None,
+                 outcome_col: str = 'choice',
+                 pos_label: Union[int, np.array] = 1) -> tuple[np.ndarray, pd.DataFrame]:
     """
-    Calculate the outcome probability given firing rates
+    Calculate the outcome probability given firing rates using ROC analysis
     if outcome_col is 'choice', this will give the choice probabilities
 
     Args:
