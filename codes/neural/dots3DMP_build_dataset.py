@@ -128,7 +128,7 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
     # --------------------------------
     # calculate median timing of "other events" relative to alignment event, for each session
     
-    rel_event_times = None
+    rel_event_times = [None for _ in popn_dfs]
     if 'other_ev' in t_params:
         
         cg_events = None
@@ -148,30 +148,49 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
         
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
-    # stack firing rates, along unit axis, with insertion on time axis according to t_idx
-    num_units = np.array([x[0].shape[0] for x in fr_list])
-    max_trs = max(list(map(len, list(conds_dfs))))
+    if not stacked:
+        
+        pseudo_pop = []
+        for i, frs in enumerate(fr_list):
+            
+            rate_pop = RatePop(
+                subject=popn_dfs[0].subject,
+                rates_averaged=return_averaged,
+                simul_recorded=True,
+                firing_rates=frs,
+                timestamps=tvecs[i],
+                psth_params=t_params,
+                rel_events=rel_event_times[i],
+                conds=conds_dfs[i],
+                clus_group=unitlabels[i],
+                area=popn_dfs.iloc[i].area,
+            )
+            
+            pseudo_pop.append(rate_pop)      
+        
+    else:
+        # stack firing rates, along unit axis, with insertion on time axis according to t_idx
+        num_units = np.array([x[0].shape[0] for x in fr_list])
+        max_trs = max(list(map(len, list(conds_dfs))))
 
+        # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
+        # and insert each population fr matrix according to how its tvec lines up with t_unq
+        # this is necessary to handle variable start/end references - different sessions might have slightly different lengths
+        # e.g. motionOn - motionOff varies on each trial, and the limit across sessions will also vary
+        # (only do it if tvecs is specified, otherwise assume use of interval averages)
 
-    # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
-    # and insert each population fr matrix according to how its tvec lines up with t_unq
-    # need to do this to handle variable start/end references, different sessions might have different lengths
-    # e.g. motionOn - motionOff varies on each trial, and the limit across sessions will also vary
-    # only do it if tvecs is specified, otherwise assume we are just using the interval averages
+        stacked_frs, t_unq, t_idx = [], [], []
 
-    stacked_frs, t_unq, t_idx = [], [], []
+        for j in range(num_alignments):
 
-    # loop over alignments
-    for j in range(num_alignments):
+            u_pos = 0
+            if t_params['binsize'] > 0:   
 
-        u_pos = 0
-        if t_params['binsize'] > 0:     #tvecs is not None  # or fr_list[0][0].ndim == 2
+                # if j==0:
+                #     print("time vector provided, concatenating time-resolved firing rates into pseudo-population\n")
 
-            if j==0:
-                print("time vector provided, concatenating time-resolved firing rates into pseudo-population\n")
-
-            concat_tvecs = [tvecs[i][j] for i in range(num_sessions)]
-            t_unq.append(np.unique(np.concatenate(concat_tvecs)))
+                concat_tvecs = [tvecs[i][j] for i in range(num_sessions)]
+                t_unq.append(np.unique(np.concatenate(concat_tvecs)))
             t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
 
             stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
@@ -192,14 +211,16 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
     area = np.array([p.area for n, p in zip(num_units, popn_dfs) for _ in range(n)]) 
     u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
 
-    # make conditions list the same size as units (replicate conditions list for units within the same session)
-    # stacked_conds = [conds_dfs[u] for u in u_idx]
+        # make conditions list the same size as units (replicate conditions list for units within the same session)
+        # stacked_conds = [conds_dfs[u] for u in u_idx]
 
-    pseudo_pop = PseudoPop(
-        subject=popn_dfs[0].subject,
-        firing_rates=stacked_frs,
-        timestamps=t_unq,
-        psth_params=t_params,
+        pseudo_pop = RatePop(
+            subject=popn_dfs[0].subject,
+            rates_averaged=return_averaged,
+            simul_recorded=False,
+            firing_rates=stacked_frs,
+            timestamps=t_unq,
+            psth_params=t_params,
         rel_events=rel_event_times,
         conds=conds_dfs,
         clus_group=np.hstack(unitlabels),

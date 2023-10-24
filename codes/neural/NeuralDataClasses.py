@@ -153,7 +153,10 @@ class RatePop:
     firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
     
-    rates_separated: bool = field(default=True, repr=False)
+    sep_alignments: bool = field(default=True, repr=False)
+    rates_averaged: bool = field(default=False, repr=False)
+    simul_recorded: bool = field(default=True, repr=False)
+    
     psth_params: dict = field(default_factory=dict, repr=False)
 
     # one entry per session
