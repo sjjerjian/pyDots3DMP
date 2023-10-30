@@ -359,14 +359,57 @@ class RatePop:
         else:
             print('Unable to reindex - either rel_events does not exist, or an invalid event was provided\n')
         
-        return self     
+    
+    def recode_conditions(self, columns: Sequence[str], old_values: Sequence[float],
+                          new_values: Union[Sequence[float], float]):
+        """Recode conditions in order to pool them together for analysis
+
+        Args:
+            columns (Sequence): sequence of strings referring to column in conds
+            old_values (Sequence): _description_
+            new_values (Union[list, int, float]): _description_
+        """
+        self.conds = recode_conditions(columns, old_values, new_values)
         
+        
+    def flip_rates(self, unit_inds: np.ndarray[Union[bool, int]], col: Union[str, np.ndarray]) -> None:
+        """Flip firing rates for specified units for condition in col (e.g. recoding choice firing rate as pref/null)
 
-# %% util functions
+        Args:
+            unit_inds (_type_): array of ints or bools referencing which units to flip
+            col (Union[str, np.ndarray]): column values for flipping (either a string referring to column in self.conds
+            or np.array of hand-coded values. Should have only two unique values)
+        """
+        
+        if isinstance(col, str):
+            col = self.conds[col]
+        
+        val_flip = np.unique(col)
+        assert len(val_flip) == 2, "Condition for flipping on should have only 2 unique values"
+        
+        flag_sep = self.sep_alignments
+        self.concat_alignments()
+        
+        # flip 'em (just the units selected in unit_inds)
 
-def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: list[float], 
+        these_units = self.firing_rates[unit_inds, :, :]
+        val0, val1 = col==val_flip[0], col==val_flip[1]
+        
+        # this works to simply interchange them, although definitely need some unit tests here to make sure it works properly!
+        these_units[:, val0, :], these_units[:, val1, :] = \
+            these_units[:, val1, :], these_units[:, val0, :]
+        
+        self.firing_rates[unit_inds, :, :] = these_units
+        
+        if flag_sep:
+            self.split_alignments()
+        
+        
+# %% externally defined util functions
+    
+def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: Sequence[float], 
                       new_values: Union[Sequence[float], float]):
-    """_summary_
+    """Recode conditions in order to pool them together for analysis
 
     Args:
         conds (pd.DataFrame): dataframe of conditions
@@ -390,6 +433,7 @@ def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: l
                 self.conds.loc[self.conds[col] == orig_val, col] = new_values
 
     return conds
+
 
 def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence, 
                     cond_groups: Optional[pd.DataFrame]) -> dict:
