@@ -9,7 +9,6 @@ import matplotlib as mpl
 
 from scipy.ndimage import convolve1d
 from scipy.signal import gaussian
-from sklearn.metrics import roc_auc_score, roc_curve, auc
 
 from typing import Union, Optional
 
@@ -134,57 +133,15 @@ def condition_averages(f_rates, condlist, cond_groups: Optional[pd.DataFrame]) -
     return cond_fr, cond_sem, cond_groups
 
 
-def roc_outcome(f_rates: np.ndarray, condlist: pd.DataFrame, 
-                 cond_groups: Optional[pd.DataFrame], cond_cols=None,
-                 outcome_col: str = 'choice',
-                 pos_label: Union[int, np.array] = 1) -> tuple[np.ndarray, pd.DataFrame]:
-    """
-    Calculate the outcome probability given firing rates using ROC analysis
-    if outcome_col is 'choice', this will give the choice probabilities
-
-    Args:
-        f_rates (np.ndarray): single trial firing rates, units x trials x time
-        condlist (pd.DataFrame): _description_
-        cond_groups (pd.DataFrame, optional): _description_. Defaults to None.
-        cond_cols (_type_, optional): _description_. Defaults to None.
-        outcome_col (str, optional): _description_. Defaults to 'choice'.
-
-    Returns:
-        tuple[np.ndarray, pd.DataFrame]: _description_
-    """
-    
-    # TODO allow cond_groups to be None, and calculate out_prob without consideration of grouping
-    if cond_cols is None:
-        cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(outcome_col)]
-        
-    ic, nC, cg = condition_index(condlist[cond_cols], cond_groups)
-
-    # result is units x conditions x time
-    out_prob = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
-    
-    for c in range(nC):
-        if np.sum(ic == c):
-            y_inds = condlist.loc[ic==c, outcome_col] - 1
-            
-            for u in range(f_rates.shape[0]):
-                for t in range(f_rates.shape[2]):
-                    fr = f_rates[u, ic==c, t]
-                    nan_idx = np.isnan(fr)
-                    if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1:
-                        continue
-                    out_prob[u, c, t] = roc_auc_score(y_inds[~nan_idx], fr[~nan_idx])
-
-    return out_prob, cg
-
-
-def pref_hdg(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups=None,
-             cond_cols=None, method: str = 'peak') -> np.ndarray:
+def pref_hdg_dir(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]=None,
+                 cond_cols=None, method: str = 'peak') -> np.ndarray:
     
     # f_rates should be raw, or fit
-    # for each row in cond_groups
-    # take peak, or sum of left vs right
+    # for each row in cond_groups, calulate preferred heading (0 (left), or 1 (right) for each condition in cond_groups)
     
-    # TODO need to account for cond_groups as well (also above)
+    if cond_groups is None:
+        ic, nC, cond_groups = condition_index(condlist)
+    
     if cond_cols is None:
         cond_cols = cond_groups.columns[~cond_groups.columns.str.contains('heading')]
         
@@ -193,45 +150,45 @@ def pref_hdg(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups=None,
     
     if f_rates.ndim == 2:
         f_rates = f_rates[:, :, np.newaxis]
-    pref_hdgs = np.full((f_rates.shape[0], nC, f_rates.shape[2]), fill_value=np.nan)
+        
+    pref_dir = np.full((f_rates.shape[0], nC, f_rates.shape[2]), fill_value=np.nan)
+    pref_fr = np.full((f_rates.shape[0], nC, f_rates.shape[2]), fill_value=np.nan)
 
     for c in range(nC):
+
         fr_c = f_rates[:, ic==c, ...]
-        hdg_c = condlist.loc[ic==c, 'heading'].values
         fr_c[np.isnan(fr_c)] = 0
         
+        # no trials of that condition
+        if fr_c.sum() == 0:
+            continue
+        
+        hdg_c = condlist.loc[ic==c, 'heading'].values
+        
+        r_minus_l = np.nansum(fr_c[:, hdg_c > 0, ...], axis=1) - np.nansum(fr_c[:, hdg_c < 0, ...], axis=1)
+        r_plus_l = np.nansum(fr_c[:, hdg_c > 0, ...], axis=1) + np.nansum(fr_c[:, hdg_c < 0, ...], axis=1)
+        
         if method == 'peak':
-            pref_hdgs[:, c, :] = np.sign(hdg_c[np.argmax(fr_c, axis=1)])
+            pref_dir[:, c, :] = np.sign(hdg_c[np.argmax(fr_c, axis=1)])
+
         elif method == 'sum':
-            pref_hdgs[:, c, :] = np.sign(np.sum(fr_c[:, hdg_c > 0, ...], axis=1) - \
-                                np.sum(fr_c[:, hdg_c < 0, ...], axis=1))
+            # r_minus_l = np.sum(fr_c[:, hdg_c > 0, ...], axis=1) - np.sum(fr_c[:, hdg_c < 0, ...], axis=1)
+            pref_dir[:, c, :] = np.sign(r_minus_l)
+
             
         elif method == 'trapz':
-            pref_hdgs[:, c, :] = np.sign(np.trapz(fr_c[:, hdg_c >= 0, ...],
-                                                  x=hdg_c[hdg_c >= 0]) - \
-                                         np.trapz(fr_c[:, hdg_c <= 0, ...],
-                                                  x=hdg_c[hdg_c <= 0])
-            )
-                                                        
-    return np.squeeze(pref_hdgs)
+            r_minus_l = np.trapz(fr_c[:, hdg_c >= 0, ...], x=hdg_c[hdg_c >= 0]) - \
+                np.trapz(fr_c[:, hdg_c <= 0, ...], x=hdg_c[hdg_c <= 0])
+            pref_dir[:, c, :] = np.sign(r_minus_l)
+        
+        pref_fr[:, c, :] =  r_minus_l
+        
+    # set zeros to NaN, and -1 (i.e. left) to 0
+    pref_dir[pref_dir==0] = np.nan
+    pref_dir[pref_dir==-1] = 0
+                                                     
+    return np.squeeze(pref_dir), np.squeeze(pref_fr)
             
-
-def roc_auc_threshold(firing_rates, labels, num_points=100):
-
-    linspace_rates = np.linspace(np.min(f_rates), np.min(f_rates), num_points)
-    
-    # Initialize arrays to store false positive rates (FPR) and true positive rates (TPR)
-    fpr = np.zeros(num_points)
-    tpr = np.zeros(num_points)
-    
-    for i, threshold in enumerate(linspace_rates):
-        # Calculate the ROC curve for the current threshold
-        fpr[i], tpr[i], _ = roc_curve(labels, (f_rates >= threshold).astype(int))
-    
-    # Calculate the ROC AUC using the trapezoidal rule
-    roc_auc = auc(fpr, tpr)
-    
-    return fpr, tpr, roc_auc
 
 
 
