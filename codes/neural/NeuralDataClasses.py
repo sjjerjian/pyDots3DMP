@@ -774,3 +774,88 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
     cbar.set_label(hue)
 
     return fig, axs
+
+
+
+def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_events, plot_single_trials: bool = False, **fig_kwargs):
+            
+    cond_cols = []
+    if 'row' in fig_kwargs:
+        cond_cols.append(fig_kwargs['row'])
+        urow = np.unique(cond_df[fig_kwargs['row']])
+        nrows = len(urow)
+    else:
+        nrows = 1
+        
+    if 'col' in fig_kwargs:
+        cond_cols.append(fig_kwargs['col'])
+        ucol = np.unique(cond_df[fig_kwargs['col']])
+        ncols = len(ucol)
+    else:
+        ncols = 1
+
+    if len(cond_cols) == 0:
+        raise ValueError('must specify row and/or col')
+    
+    ncols_final = ncols * len(timestamps)
+    width_ratios = ncols * list(map(len, timestamps))
+    
+    # set hue colormap
+    if 'hue' in fig_kwargs:
+        
+        if fig_kwargs['hue'] == 'heading':
+            hue_norm = (-12, 12)
+            if isinstance(hue_norm, tuple):
+                hue_norm = mpl.colors.Normalize(vmin=hue_norm[0], vmax=hue_norm[1])
+            cmap = 'RdBu'
+        elif fig_kwargs['hue'] == 'choice_wager':
+            cmap = 'Paired'
+
+        cmap = mpl.colormaps[cmap]
+        colors = cmap
+    
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols_final, gridspec_kw=dict(width_ratios=width_ratios), sharex=True, sharey=True)
+
+    for col in range(ncols_final):
+        col_i = col%len(fr_list)
+        f_rates = fr_list[col_i]
+        
+        for row in range(nrows):
+            
+            print(row, col, col_i)
+            if 'row' in fig_kwargs and 'col' in fig_kwargs:
+                cond_trials = (cond_df[cond_cols]==(urow[row], ucol[col//len(fr_list)])).all(axis=1).values
+            elif 'row' in fig_kwargs:
+                cond_trials = (cond_df[cond_cols]==urow[row]).values
+            elif 'col' in fig_kwargs:
+                cond_trials = (cond_df[cond_cols]==ucol[col_i]).values
+
+            hue_trials = cond_df.loc[cond_trials,fig_kwargs['hue']].values
+            
+            if fig_kwargs['hue']=='heading':
+                colors = cmap(hue_norm(hue_trials).data.astype('float'))
+            
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                
+                ax_data = np.squeeze(np.nanmean(f_rates[:, cond_trials, :], axis=0)) # average over units
+                
+                for hue in np.unique(hue_trials): 
+                        
+                    y_data = ax_data[hue_trials == hue, :].T
+                    color = colors[hue_trials == hue, :]
+                    
+                    if not plot_single_trials:
+                        y_data = np.nanmean(y_data, axis=1)
+                        color = np.nanmean(color, axis=0)
+
+                    axs[row, col].plot(timestamps[col_i], y_data, color=color)
+            
+            print(col_i)           
+            axs[row, col].set_xlim([timestamps[col_i][0], timestamps[col_i][-1]])    
+            
+            xtix = axs[row, col].get_xticks()
+            # xtix_new = np.where(xtix==0, align_events[col_i], xtix)
+            # axs[row, col].set_xticks(xtix, xtix_new)
+                        
+    return fig, axs
