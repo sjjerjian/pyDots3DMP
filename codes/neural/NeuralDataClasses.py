@@ -546,36 +546,52 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
 
         tr_starts = align[:, 0] + trange[0]
         tr_ends = align[:, 1] + trange[1]
-        durs = tr_ends - tr_starts
+    durs = tr_ends - tr_starts
 
-        # compute 'corrected' tStart and tEnd based on align_ev input
-        if which_ev == 1:
-            tstarts_new = tr_starts - align[:, 1]
-            tstart_new = np.min(tstarts_new)
-            tend_new = trange[1]
-            tends_new = tend_new.repeat(tstarts_new.shape[0])
+    # compute 'corrected' tStart and tEnd based on align_ev input
+    # TODO add explanation for this
+    if which_ev == 1:
+        tstarts_rel = tr_starts - align[:, 1]
+        tstart_rel = np.min(tstarts_rel)
+        tend_rel = trange[1]
+        tends_rel = tend_rel.repeat(tstarts_rel.shape[0])
 
-        elif which_ev == 0:
-            tends_new = tr_ends - align[:, 0]
-            tend_new = np.max(tends_new)
-            tstart_new = trange[0]
-            tstarts_new = tstart_new.repeat(tends_new.shape[0])
+    elif which_ev == 0:
+        tends_rel = tr_ends - align[:, 0]
+        tend_rel = np.max(tends_rel)
+        tstart_rel = trange[0]
+        tstarts_rel = tstart_rel.repeat(tends_rel.shape[0])
+    
+    # reset the absolute tr_starts and tr_ends from here
+    tr_starts = align[:, 0] + tstart_rel
+    tr_ends = align[:, 1] + tend_rel
 
-        if binsize > 0:
-            # TODO actually should extend here by the amount we need for the correct smoothing 
-            # TODO allow for stepsize overlap
+    # if smoothing firing rates, extend the range a bit to use real spike counts for smoothing at the edges
+    # TODO this is causing a mismatch in lengths later when trying to cut down, need to FIX this
+    # if sm_params:
+    #     tstart_orig, tend_orig = tstart_rel, tend_rel
+    #     tstart_rel -= sm_params['width']/2
+    #     tend_rel += sm_params['width']/2
+        
+    if binsize > 0:
+        # TODO allow for stepsize overlap
+        if stepsize is None:
             if trange[0] < 0 and trange[1] > 0:
-                # ensure that time '0' is in between two bins exactly
-                x0 = np.arange(0, tstart_new-binsize, -binsize)
-                x1 = np.arange(0, tend_new+binsize+1e-3, binsize)
+                # set forwards and backwards bins separately first, to ensure that time 0 is one of the bin edges
+                x0 = np.arange(0, tstart_rel-binsize, -binsize)
+                x1 = np.arange(0, tend_rel+binsize+1e-3, binsize)
                 x = np.hstack((x0[::-1, ], x1[1:, ]))
             else:
-                x = np.arange(tstart_new, tend_new+binsize, binsize)
+                x = np.arange(tstart_rel, tend_rel+binsize, binsize)
 
             fr_out = np.full([nTr, x.shape[0]-1], np.nan)
+            
         else:
-            fr_out = np.full(nTr, np.nan)
-            x = durs
+            raise NotImplementedError('Stepsize for producing overlapping binned spike counts is not yet implemented')
+            #TODO set bins and fr_out for stepsize?
+    else:
+        fr_out = np.full(nTr, np.nan)
+        x = durs
 
         spktimes_aligned = []
         if spiketimes.any():
