@@ -271,10 +271,15 @@ class RatePop:
         return self
     
     
-    def demean(self, t_int=0, t_range=None, across_conds=True, standardize=True, return_split=True):
+    def demean(self, t_int=None, t_range=None, across_conds=True, standardize=True, return_split=True):
         """
-        t_int: interval to use as baseline - if None, use all
+        t_int: interval to use as baseline - if None, use all (i.e. assume concatenated, or do the concatenation)
         """
+        
+        flag_sep = self.sep_alignments
+        
+        if return_split == 'keep':
+            return_split = flag_sep
         
         if t_int is None:
             self.concat_alignments()
@@ -283,7 +288,7 @@ class RatePop:
             
         axis = 2
         if across_conds:
-            axis = (1, 2)
+            axis = (2, 1) # average across time, then conditions
 
         if t_int is None:
             if t_range is None:
@@ -291,12 +296,17 @@ class RatePop:
             else:
                 ind0 = np.argmin(np.abs(self.timestamps - t_range[0]))
                 ind1 = np.argmin(np.abs(self.timestamps - t_range[1])) 
-                
+            
+            
             # subtract average baseline
             bsln_fr = np.nanmean(self.firing_rates[:, :, ind0:ind1], axis=axis)
             
             if standardize:
-                std_divide = np.nanstd(self.firing_rates[:, :, ind0:ind1], axis=axis)
+                std_divide = np.nanstd(self.firing_rates[:, :, ind0:ind1], axis=2)
+                
+                if across_conds:
+                    # now take MEAN stdev across conditions
+                    std_divide = np.nanmean(std_divide, axis=1)
             
         else:
             if t_range is None:
@@ -306,25 +316,28 @@ class RatePop:
             ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
         
         # subtract average baseline
-        bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
-        
-            if standardize:
-                std_divide = np.nanstd(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
+            bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
+            
+            if standardize:                
+                std_divide = np.nanstd(self.firing_rates[t_int][:, :, ind0:ind1], 2)
+                
+                if across_conds:
+                    # now take MEAN stdev across conditions
+                    std_divide = np.nanmean(std_divide, axis=1)
         
             self.concat_alignments()
-
 
         self.firing_rates -= np.expand_dims(bsln_fr, axis=axis)
         if standardize:
             self.firing_rates /= np.expand_dims(std_divide, axis=axis)
         
-        if return_split:
+        if return_split is True:
             self.split_alignments()
             
         return self
                 
     
-    def normalize(self, t_int=0, t_range=None, across_conds: bool = True, softmax_const: int = 0):
+    def normalize(self, t_int=None, t_range=None, across_conds: bool = True, softmax_const: int = 0):
 
         # only separate alignments at end if they were separated to begin with
         flag_sep = self.sep_alignments
