@@ -849,20 +849,118 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
     return fig, axs
 
 
+# %% ----------------------------------------------------------------
+# general time series plotting functions
 
-def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_events, plot_single_trials: bool = False, **fig_kwargs):
+
+def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None, 
+                    conds: Optional[pd.DataFrame] = None, 
+                    xlabel: Optional[str] = '', ylabel: Optional[str] = '',
+                    hue_labels: Optional[Sequence] = None,
+                    **fig_kws):
+    """Plot a timeseries, grouped by conditions (according to fig_kws)
+    Specify row, col and hue
+    
+    # TODO add style option
+
+    Args:
+        X (np.ndarray): array containing time series. conditions/trials x timesteps, or units x conditions/trials x timesteps
+        If ndim==3, will average over units (axis=0) first. NOTE that this doesn't do any averaging over trials - 
+        if X contains condition-averaged data already, those traces will be plotted. If X contains individual trials, individual trials averaged across units will be shown.
+        timestamps (Optional[np.ndarray], optional): time indices - will determine xticks. Defaults to None.
+        conds (Optional[pd.DataFrame], optional): dataframe containing conditions. Defaults to None.
+        xlabel (Optional[str], optional): label for x-axes. Defaults to ''.
+        ylabel (Optional[str], optional): label for y-axes. Defaults to ''.
+
+    Returns:
+        _type_: figure handle
+    """
+    
+    
+    if timestamps is None:
+        timestamps = np.arange(X.shape[-1])
+        
+    if X.ndim == 3:
+        X = np.squeeze(np.nanmean(X, axis=0)) # average over units, within each unique trial/condition     
+    
+    if conds is not None:
+        
+        # set hue colormap
+        if 'hue' in fig_kws:
+            
+            if fig_kws['hue'] == 'heading':
+                hue_norm = (-12, 12)
+                if isinstance(hue_norm, tuple):
+                    hue_norm = mpl.colors.Normalize(vmin=hue_norm[0], vmax=hue_norm[1])
+                cmap = 'RdBu'
+            elif fig_kws['hue'] == 'choice_wager':
+                cmap = 'Paired'
+
+            cmap = mpl.colormaps[cmap]
+            colors = np.asarray(cmap.colors)
+            colors = colors[:len(np.unique(conds[fig_kws['hue']])), :]
+        
+        cond_cols = []
+        if 'row' in fig_kws:
+            cond_cols.append(fig_kws['row'])
+        if 'col' in fig_kws:
+            cond_cols.append(fig_kws['col'])
+            
+        fig = sns.FacetGrid(data=conds, **fig_kws)
+        for ax_key, ax in fig.axes_dict.items():
+            
+            cond_trials = (conds[cond_cols]==ax_key).all(axis=1).values
+            ax_data = X[cond_trials, :]
+
+            if 'hue' in fig_kws:
+                hue_trials = conds.loc[cond_trials, fig_kws['hue']].values
+                if fig_kws['hue']=='heading':
+                    colors = cmap(hue_norm(hue_trials).data.astype('float'))
+            
+                lbl = None
+                for hue in np.unique(hue_trials): 
+                            
+                    x_cond_hue = ax_data[hue_trials == hue, :].T
+                    x_color = colors[hue_trials == hue, :]
+                    
+                    if hue_labels:
+                        lbl = hue_labels[hue]
+                    ax.plot(timestamps, x_cond_hue, c=x_color, label=lbl)
+            
+            else:
+                raise NotImplementedError("Not implemented without hue parameter")
+                # TODO: allow hue to be ignored
+                
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            
+            ax.legend()
+            
+    else:
+
+        fig = plt.figure()
+        
+           
+        plt.plot(timestamps, X.T)
+
+    return fig  
+
+
+
+# WIP
+def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_events, plot_single_trials: bool = False, **fig_kws):
             
     cond_cols = []
-    if 'row' in fig_kwargs:
-        cond_cols.append(fig_kwargs['row'])
-        urow = np.unique(cond_df[fig_kwargs['row']])
+    if 'row' in fig_kws:
+        cond_cols.append(fig_kws['row'])
+        urow = np.unique(cond_df[fig_kws['row']])
         nrows = len(urow)
     else:
         nrows = 1
         
-    if 'col' in fig_kwargs:
-        cond_cols.append(fig_kwargs['col'])
-        ucol = np.unique(cond_df[fig_kwargs['col']])
+    if 'col' in fig_kws:
+        cond_cols.append(fig_kws['col'])
+        ucol = np.unique(cond_df[fig_kws['col']])
         ncols = len(ucol)
     else:
         ncols = 1
@@ -874,44 +972,48 @@ def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_even
     width_ratios = ncols * list(map(len, timestamps))
     
     # set hue colormap
-    if 'hue' in fig_kwargs:
+    if 'hue' in fig_kws:
         
-        if fig_kwargs['hue'] == 'heading':
+        if fig_kws['hue'] == 'heading':
             hue_norm = (-12, 12)
             if isinstance(hue_norm, tuple):
                 hue_norm = mpl.colors.Normalize(vmin=hue_norm[0], vmax=hue_norm[1])
             cmap = 'RdBu'
-        elif fig_kwargs['hue'] == 'choice_wager':
+        elif fig_kws['hue'] == 'choice_wager':
             cmap = 'Paired'
 
         cmap = mpl.colormaps[cmap]
         colors = cmap
     
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols_final, gridspec_kw=dict(width_ratios=width_ratios), sharex=True, sharey=True)
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols_final, gridspec_kw=dict(width_ratios=width_ratios), sharey=True)
 
     for col in range(ncols_final):
         col_i = col%len(fr_list)
         f_rates = fr_list[col_i]
         
+        if col_i > 0:
+            sns.despine(left=True)
+            
         for row in range(nrows):
+            sns.despine(right=True, top=True)
             
             print(row, col, col_i)
-            if 'row' in fig_kwargs and 'col' in fig_kwargs:
+            if 'row' in fig_kws and 'col' in fig_kws:
                 cond_trials = (cond_df[cond_cols]==(urow[row], ucol[col//len(fr_list)])).all(axis=1).values
-            elif 'row' in fig_kwargs:
+            elif 'row' in fig_kws:
                 cond_trials = (cond_df[cond_cols]==urow[row]).values
-            elif 'col' in fig_kwargs:
+            elif 'col' in fig_kws:
                 cond_trials = (cond_df[cond_cols]==ucol[col_i]).values
 
-            hue_trials = cond_df.loc[cond_trials,fig_kwargs['hue']].values
+            hue_trials = cond_df.loc[cond_trials,fig_kws['hue']].values
             
-            if fig_kwargs['hue']=='heading':
+            if fig_kws['hue']=='heading':
                 colors = cmap(hue_norm(hue_trials).data.astype('float'))
             
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 
-                ax_data = np.squeeze(np.nanmean(f_rates[:, cond_trials, :], axis=0)) # average over units
+                ax_data = np.squeeze(np.nanmean(f_rates[:, cond_trials, :], axis=0)) # average over units
                 
                 for hue in np.unique(hue_trials): 
                         
@@ -924,11 +1026,12 @@ def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_even
 
                     axs[row, col].plot(timestamps[col_i], y_data, color=color)
             
-            print(col_i)           
             axs[row, col].set_xlim([timestamps[col_i][0], timestamps[col_i][-1]])    
             
             xtix = axs[row, col].get_xticks()
-            # xtix_new = np.where(xtix==0, align_events[col_i], xtix)
-            # axs[row, col].set_xticks(xtix, xtix_new)
-                        
+            xtix_new = np.where(xtix==0, align_events[col_i], xtix)
+            axs[row, col].set_xticks(xtix, xtix_new)
+    
+    plt.show()
+                      
     return fig, axs
