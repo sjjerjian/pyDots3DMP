@@ -17,7 +17,7 @@ from typing import Union, Optional
 #    fr_list denotes a list of f_rates arrays, one per interval/alignment
 
 
-def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray],
+def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray]=None,
                          insert_blank: bool = False) -> tuple[Union[list, tuple], Union[list, tuple]]:
     """
     given multiple f_rates matrices stored in a list (e.g. different alignments),
@@ -47,7 +47,7 @@ def concat_aligned_rates(fr_list: list[np.ndarray], tvecs: Optional[np.ndarray],
     return rates_cat, tvecs_cat, len_intervals
 
 
-def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray],
+def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarray]=None,
                                 insert_blank: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     if tvecs is not None:
@@ -61,8 +61,8 @@ def concat_aligned_rates_single(frs: list[np.ndarray], tvecs: Optional[np.ndarra
             # insert NaN column at points where alignments are concatenated        
             # add (i-1) to move along as we are updating the array within the loop!
             for i, intvl in enumerate(len_intervals[:-1]):
-                rates_cat = np.insert(rates_cat, intvl+(i-1), np.nan, axis=2)
-                tvecs_cat = np.insert(tvecs_cat, intvl+(i-1), np.nan)
+                rates_cat = np.insert(rates_cat, intvl+i, np.nan, axis=2)
+                tvecs_cat = np.insert(tvecs_cat, intvl+i, np.nan)
             
     else:
         # each 'interval' is length 1, if binsize was set to 0
@@ -85,7 +85,7 @@ def mask_low_firing(f_rates: np.ndarray, minfr: int = 0) -> np.ndarray:
 
 # %% trial condition helpers
 
-def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]) -> tuple[np.ndarray, int, pd.DataFrame]:
+def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]=None) -> tuple[np.ndarray, int, pd.DataFrame]:
     """
     given a single trial conditions list, and a unique set of conditions,
     return the trial index for each condition
@@ -108,7 +108,7 @@ def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame])
     return ic, nC, cond_groups
 
 
-def condition_averages(f_rates, condlist, cond_groups: Optional[pd.DataFrame]) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+def condition_averages(f_rates, condlist, cond_groups: Optional[pd.DataFrame]=None) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """
     calculate condition-averaged firing rates
     f_rates: single trial firing rates [units x trials x time/interval]
