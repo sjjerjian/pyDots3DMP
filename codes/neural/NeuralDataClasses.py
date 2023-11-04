@@ -358,19 +358,57 @@ class RatePop:
         return self   
     
     
-    def reindex_to_event(self, event: str = 'stimOn'):
+    def average_rel_event_times(self, by='index'):
         
-        if self.rel_events and event in self.rel_events:
+        if isinstance(self.rel_events, list):
+            print('stop here')
             
-            self.timestamps_reindexed = copy(self.timestamps)
-            time_shift = self.rel_events[event].mean(axis=0).to_dict()
+            final_dict = dict()
+            for d in self.rel_events:
+                for key, df in d.items():
+                    if key not in final_dict:
+                        final_dict[key] = df
+                    else:
+                        final_dict[key] = pd.concat([final_dict[key], df])
             
-            for t, ev in enumerate(self.psth_params['align_ev']):
-                if ev in time_shift:
-                    self.timestamps_reindexed[t] = self.timestamps[t] + time_shift[ev]            
-                    print(f"{ev} alignment time base now relative to {event}")    
+            # use group-by over index or desired categorical columns
+            for key in final_dict.keys():
+                if by=='index':
+                    grp_by = final_dict[key].index
+                else:       
+                    grp_by = final_dict[key][by]
+                final_dict[key] = final_dict[key].groupby(by=grp_by).mean()
+
+            self.rel_events = final_dict
+        
         else:
-            print('Unable to reindex - either rel_events does not exist, or an invalid event was provided\n')
+            print('relative event times are already averaged across sessions, or this is just one session')    
+            
+        return self        
+        
+            
+    def reindex_to_event(self, event: str = 'stimOn') -> None:
+         
+        if not self.time_reindexed:
+            
+            if self.rel_events and event in self.rel_events:
+                
+                # self.timestamps_reindexed = copy(self.timestamps)
+                time_shift = self.rel_events[event].mean(axis=0).to_dict()
+                
+                align_events = [al[0] if isinstance(al, list) else al for al in self.psth_params['align_ev']]
+
+                for t, ev in enumerate(align_events):
+                    if ev in time_shift:
+                        self.timestamps += time_shift[ev]
+                        # self.timestamps_reindexed[t] = self.timestamps[t] + time_shift[ev]            
+                        print(f"{ev} alignment time base now relative to {event}")    
+            else:
+                print('Unable to re-index - either rel_events does not exist, or an invalid event was provided\n')
+                
+            self.time_reindexed = True
+        else:
+            print('Already re-indexed')
         
     
     def recode_conditions(self, columns: Sequence[str], old_values: Sequence[float],
