@@ -169,59 +169,32 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
                 rel_events=rel_event_times[i],
                 conds=conds_dfs[i],
                 clus_group=unitlabels[i],
-                area=popn_dfs.iloc[i].area,
+                area=popns.iloc[i].area,
             )
             
             pseudo_pop.append(rate_pop)      
         
     else:
-        # stack firing rates, along unit axis, with insertion on time axis according to t_idx
-        num_units = np.array([x[0].shape[0] for x in fr_list])
-        max_trs = max(list(map(len, list(conds_dfs))))
-
-        # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
-        # and insert each population fr matrix according to how its tvec lines up with t_unq
-        # this is necessary to handle variable start/end references - different sessions might have slightly different lengths
-        # e.g. motionOn - motionOff varies on each trial, and the limit across sessions will also vary
-        # (only do it if tvecs is specified, otherwise assume use of interval averages)
-
-        stacked_frs, t_unq, t_idx = [], [], []
-
-        for j in range(num_alignments):
-
-            u_pos = 0
-            if t_params['binsize'] > 0:   
-
-                # if j==0:
-                #     print("time vector provided, concatenating time-resolved firing rates into pseudo-population\n")
-
-                concat_tvecs = [tvecs[i][j] for i in range(num_sessions)]
-                t_unq.append(np.unique(np.concatenate(concat_tvecs)))
-            t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
-
-            stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
-            for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess]), t_idx[j][sess]] = fr_list[sess][j]
-                    u_pos += num_units[sess]
-
-            else:
-                # if j==0:
-                #     print("concatenating interval average rates into pseudo-population\n")
-
-                stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
-                for sess in range(len(fr_list)):
-                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:len(conds_dfs[sess])] = np.squeeze(fr_list[sess][j])
-                u_pos += num_units[sess]
-
-    # list of area, session number, and unit number within session, for each unit
-    area = np.array([p.area for n, p in zip(num_units, popn_dfs) for _ in range(n)]) 
-    u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
+        
+        if t_params['binsize'] == 0:
+            stacked_frs, t_unq, num_units = stack_firing_rates(fr_list)
+        else:
+            stacked_frs, t_unq, num_units = stack_firing_rates(fr_list, tvecs)
+        
+        
+        # list of area, session number, and unit number within session, for each unit
+        area = np.array([p.area for n, p in zip(num_units, popns) for _ in range(n)]) 
+        u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
 
         # make conditions list the same size as units (replicate conditions list for units within the same session)
         # stacked_conds = [conds_dfs[u] for u in u_idx]
+        
+        # for trial-averaged data, cond_groups is the same for each session
+        if return_averaged:
+            conds_dfs = conds_dfs[0]
 
         pseudo_pop = RatePop(
-            subject=popn_dfs[0].subject,
+            subject=popns[0].subject,
             rates_averaged=return_averaged,
             simul_recorded=False,
             firing_rates=stacked_frs,
@@ -237,7 +210,95 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
     return pseudo_pop
 
 
-# %% convert cluster group int into cluster label
+def stack_rate_populations(rate_populations: list) -> RatePop:
+
+    rel_events = [x.rel_events for x in rate_populations]
+    conds = [x.conds for x in rate_populations]
+    clus_group = np.hstack([x.clus_group for x in rate_populations])
+    
+    if rate_populations[0].rates_averaged:
+        conds = conds[0]
+    
+    firing_rates = [x.firing_rates for x in rate_populations]
+    tvecs = [x.timestamps for x in rate_populations]
+    
+    if rate_populations[0].psth_params['binsize'] == 0:
+        firing_rates, _, num_units = stack_firing_rates(firing_rates)
+    else:
+        firing_rates, tvecs, num_units = stack_firing_rates(firing_rates, tvecs)
+    
+    area = np.array([p.area for n, p in zip(num_units, rate_populations) for _ in range(n)]) 
+    u_idx = np.array([i for i, n in enumerate(num_units) for _ in range(n)])
+    
+    
+    stacked_pop = RatePop(
+        subject=rate_populations[0].subject,
+        rates_averaged=rate_populations[0].rates_averaged,
+        simul_recorded=rate_populations[0].simul_recorded,
+        firing_rates=firing_rates,
+        timestamps=tvecs,
+        psth_params=rate_populations[0].psth_params,
+        rel_events=rel_events,
+        conds=conds,
+        clus_group=clus_group,
+        area=area,
+        unit_session=u_idx,    
+    )
+    
+    return stacked_pop
+    
+    
+    
+def stack_firing_rates(fr_list: Sequence, tvecs: Optional[Sequence] = None):
+    
+    # define some useful variables for later on
+    num_sessions, num_alignments = len(fr_list), len(fr_list[0])
+    
+    num_units = np.array([x[0].shape[0] for x in fr_list]) # number of units per session
+    max_trs = max(list(map(lambda x: x[0].shape[1], fr_list))) # max number of trials (or conditions) across all sessions
+
+    stacked_frs, t_unq, t_idx = [], [], []
+    
+    # to stack all frs with time-resolutions preserved, make a single unique time vector (t_unq)
+    # and insert each population fr matrix according to how its specific tvec lines up with t_unq
+    # this is necessary to handle variable start/end references and make sure sessions are lined up correctly
+    # - different sessions might have slightly different lengths
+    # e.g. motionOn - motionOff varies on each trial
+    # (only do it if tvecs is specified, otherwise assume use of interval averages)
+    
+    # NOTE unstacked firing rates will come in as a nested lists of lists, with outer list elements for each session
+    # and inner list elemebts for alignments to each individual task event (could just be 1)
+    # stacked firing rates will essentially stack over the outer list, but maintain the alignments list
+
+    # loop over alignments, this becomes the top level (only) list
+    for j in range(num_alignments):
+
+        u_pos = 0
+        if tvecs is not None:  
+            # time-resolution provided, need to consider temporal alignment
+            concat_tvecs = [tvecs[i][j] for i in range(num_sessions)]
+            t_unq.append(np.unique(np.concatenate(concat_tvecs)))
+            t_idx.append([np.ravel(np.where(np.isin(t, t_unq[j]))) for t in concat_tvecs])
+
+            stacked_frs.append(np.full([num_units.sum(), max_trs, len(t_unq[j])], np.nan))
+            for sess in range(num_sessions):
+                sess_align_frs = fr_list[sess][j] # firing rates for this session and alignment
+                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:sess_align_frs.shape[1], t_idx[j][sess]] = sess_align_frs
+                u_pos += num_units[sess]
+
+        else:
+            # no time-resolution (just total firing rates in intervals), this is a bit simpler
+            stacked_frs.append(np.full([num_units.sum(), max_trs], np.nan))
+            for sess in range(num_sessions):
+                sess_align_frs = fr_list[sess][j] # firing rates for this session and alignment
+                stacked_frs[j][u_pos:u_pos+num_units[sess], 0:sess_align_frs.shape[1]] = np.squeeze(sess_align_frs)
+                u_pos += num_units[sess]    
+    
+    return stacked_frs, t_unq, num_units
+
+
+# %% ----------------------------------------------------------------
+# convert cluster group int into cluster label
 
 def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
 
