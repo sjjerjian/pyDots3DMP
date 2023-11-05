@@ -649,31 +649,48 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                 if binsize == 0:
                     fr_out[itr] = np.sum(spk_inds)
 
-                else:
-                    inds_t = spiketimes[spk_inds] - align[itr, which_ev]
+            else:
+                inds_t = spiketimes[spk_inds] - align[itr, which_ev]
+                
+                if stepsize is None:
                     fr_out[itr, :], _ = np.histogram(inds_t, x)
+                else:
+                    raise NotImplementedError('Stepsize for producing overlapping binned spike counts is not yet implemented')
 
-                    spktimes_aligned.append(inds_t)
+                # save the individual times (relative to alignment event) for raster plots
+                spktimes_aligned.append(inds_t)
 
-                    # set nans outside the range of align/trange for each trial
-                    if which_ev == 0:
-                        end_pos = np.argmin(abs(x - tends_new[itr]))
-                        fr_out[itr, end_pos:] = np.nan
-                    elif which_ev == 1:
-                        start_pos = np.argmin(abs(x - tstarts_new[itr]))
-                        fr_out[itr, :start_pos] = np.nan
+                # set nans outside the range of align/trange for each trial
+                if which_ev == 0:
+                    end_pos = np.argmin(abs(x - tends_rel[itr]))
+                    fr_out[itr, end_pos:] = np.nan
+                elif which_ev == 1:
+                    start_pos = np.argmin(abs(x - tstarts_rel[itr]))
+                    fr_out[itr, :start_pos] = np.nan
 
-            for itr in range(itr_end+1, nTr):
-                spktimes_aligned.append(np.empty(1))
+        for itr in range(itr_end+1, nTr):
+            spktimes_aligned.append(np.empty(1))
 
-            if binsize > 0:
-                x = x[:-1] + np.diff(x)/2  # shift x values to bin centers
+        if binsize > 0:
+            x = x[:-1] + np.diff(x)/2  # shift 'x' values to bin centers
 
-                if sm_params:
-                    fr_out = smooth_counts(fr_out, params=sm_params)
-
-                if normalize:
-                    fr_out /= binsize
+            if sm_params:
+                if 'binsize' not in sm_params:
+                    sm_params['binsize'] = binsize
+                fr_out, sm_nbins = smooth_fr(fr_out, params=sm_params)
+                
+                # alternative?
+                st = sm_nbins // 2
+                en = len(x) - 1 - (st+1)
+                
+                # st = np.argmin(np.abs(x - tstart_orig))
+                # en = np.argmin(np.abs(x - tend_orig))
+                
+                # x = x[st:en]
+                # fr_out = fr_out[:, st:en]
+                
+            if normalize:
+                fr_out /= binsize
 
             elif binsize == 0:
                 if normalize:
@@ -745,7 +762,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         # trial_psth in list comp is going to generate a list of tuples
         # the zip(*iterable) syntax allows us to unpack the tuples into separate variables
         spike_counts, t_vec, _ = \
-            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, sm_params)) for unit in units])
+            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, stepsize, sm_params)) for unit in units])
 
         rates.append(np.asarray(spike_counts))
         tvecs.append(np.asarray(t_vec[0]))
