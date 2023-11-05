@@ -679,42 +679,51 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                 if normalize:
                     fr_out /= x
 
-        return fr_out, x, spktimes_aligned
+    return fr_out, x, spktimes_aligned
 
 
-def smooth_counts(raw_fr, params: Optional[dict] = None):
-                  
-    # TODO assert raw_fr is 1d?
-    
+def smooth_fr(raw_fr, params: Optional[dict] = None) -> tuple[np.ndarray, int]:
+        
+
     if params is None:
         params = {'type': 'boxcar', 'binsize': 0.02,
-                  'width': 0.2, 'sigma': 0.05}
-
-    N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
+                  'width': 0.2}
 
     if params['type'] == 'boxcar':
-
+        
+        N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
         win = np.ones(N) / N
 
     elif params['type'] == 'gaussian':
-
+        
+        N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
         alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
         win = gaussian(N, std=alpha)
-        # win /= np.sum(win)  # win is already normalized in scipy
-
-    elif params['type'] == 'CHG':  # causal half-gaussian
-
-        alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
-        win = gaussian(N, std=alpha)
-        win[:(N//2)-1] = 0
-        win /= np.sum(win)  # re-normalize here
-
-    return convolve1d(raw_fr, win, axis=0, mode='nearest')
+        win /= np.sum(win)
+   
+    elif params['type'] == 'causal':
+        
+        raise NotImplementedError('Not implemented yet')
+    
+        # width = params['width']
+        # if isinstance(width, float):
+        #     width = [0.001, width]
+            
+        # rise_time, decay_time = width
+        # win = np.arange(0, rise_time + decay_time, params['binsize'])
+        # win = (1 - np.exp(win / rise_time)) * np.exp(win / decay_time)
+        # win /= np.sum(win)  # re-normalize here
+        
+    # smooth along time, which is axis 1!!!
+    smoothed_fr = convolve1d(raw_fr, win, axis=1, mode='nearest')
+    
+    return smoothed_fr, N
 
 
 #@Timer(name='calc_firing_rates_timer')
 def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]]),
-                      binsize=0.05, sm_params: dict = None,
+                      binsize: Optional[float] = 0.05, stepsize: Optional[float] = None,
+                      sm_params: dict = None,
                       condlabels=('modality', 'coherence', 'heading'),
                       return_ds=False):
 
