@@ -43,8 +43,12 @@ def decode_outcome(f_rates: np.ndarray, condlist: pd.DataFrame,
         tuple[np.ndarray, pd.DataFrame]: decoding_result, unique conditions
     """
     
-    if isinstance(estimator, str) and estimator.lower() == 'roc' and isinstance(pos_label, int):
-        pos_label = np.array([pos_label]*f_rates.shape[0])
+    if isinstance(estimator, str) and estimator.lower() == 'roc':
+        decode_as_population = False # by necessity
+        if isinstance(pos_label, int):
+            pos_label = np.array([pos_label]*f_rates.shape[0])
+        
+        
     
     if cond_groups is not None:
         if cond_cols is None:
@@ -55,8 +59,11 @@ def decode_outcome(f_rates: np.ndarray, condlist: pd.DataFrame,
         ic = np.zeros(f_rates.shape[1])
         nC, cg = 1, None
 
-    # result is units x conditions x time
-    outcome_score = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
+    # result is units x conditions x time if decoding individually
+    if decode_as_population:
+        outcome_score = np.full((nC, f_rates.shape[2]), np.nan)
+    else:
+        outcome_score = np.full((f_rates.shape[0], nC, f_rates.shape[2]), np.nan)
     
     for c in range(nC):
         if np.sum(ic == c):
@@ -89,24 +96,34 @@ def decode_outcome(f_rates: np.ndarray, condlist: pd.DataFrame,
                             nan_idx = np.isnan(fr).any(axis=1)
                             fr_good = fr[~nan_idx, :]
                             y_inds_good = y_inds
+                            
+                            if nan_idx.sum() == len(fr):
+                                continue
+                            
                         elif drop_nan_axis == 'trials':
                             nan_idx = np.isnan(fr).any(axis=0)
                             y_inds_good, fr_good = y_inds[~nan_idx], fr[:, ~nan_idx]
 
-                        cv_res = cross_validate(estimator, fr_good.T, y_inds_good, cv=cv)
-                        outcome_score[:, c, t] = np.mean(cv_res['test_score'])
-                    else:
-                        for u in range(f_rates.shape[0]): 
-                            fr = f_rates[u, ic==c, t]
-
-                            nan_idx = np.isnan(fr)
                             if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1:
                                 continue
-                            y_inds_good, fr_good = y_inds[~nan_idx], fr[~nan_idx]
                             
-                            cv_res = cross_validate(estimator, fr_good.T, y_inds_good, cv=cv)
+                        cv_res = cross_validate(estimator, fr_good.T, y_inds_good, cv=cv)
+                        outcome_score[c, t] = np.nanmean(cv_res['test_score'])
+                        
+                    else:
+                        for u in range(f_rates.shape[0]): 
+                            fr = f_rates[u, ic==c, t].reshape(-1, 1)
+
+                            nan_idx = np.isnan(fr).any(axis=1)
+                            if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1:
+                                continue
+                            y_inds_good, fr_good = y_inds[~nan_idx], fr[~nan_idx, :]
+                            
+                            cv_res = cross_validate(estimator, fr_good, y_inds_good, cv=cv)
                             outcome_score[u, c, t] = np.mean(cv_res['test_score'])
-                            
+        
+            
+                               
     return outcome_score, cg
 
 
