@@ -3,10 +3,12 @@
 import numpy as np
 import pandas as pd
 from pathlib import Path, PurePath
-import scipy.io as sio
-from collections import defaultdict
 
+import scipy.io as sio
 import pickle as pkl
+
+from typing import Optional, Union, Sequence
+
 from neural.NeuralDataClasses import ksUnit, Population, RatePop
 from neural.rate_utils import concat_aligned_rates, condition_averages
 
@@ -149,13 +151,16 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
         
     # conds_dfs = [df.assign(trialNum=np.arange(len(df))) for df in conds_dfs]
 
+    # --------------------------------
+    # build the dataset 
+    
     if not stacked:
         
         pseudo_pop = []
         for i, frs in enumerate(fr_list):
             
             rate_pop = RatePop(
-                subject=popn_dfs[0].subject,
+                subject=popns[0].subject,
                 rates_averaged=return_averaged,
                 simul_recorded=True,
                 firing_rates=frs,

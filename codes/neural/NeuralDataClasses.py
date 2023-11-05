@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+import matplotlib as mpl
+
 from datetime import date
 
 from dataclasses import dataclass, field
@@ -25,6 +27,7 @@ from copy import copy, deepcopy
 
 import seaborn as sns
 from cycler import cycler
+import warnings
 
 # %% ----------------------------------------------------------------
 # base unit class
@@ -70,7 +73,7 @@ class Unit:
 @dataclass
 class ksUnit(Unit):
   
-    # TODO add templates, amps, waveforms etc
+    # TODO add templates, amps, waveforms etc
     
     rec_set: int = 1
 
@@ -89,9 +92,6 @@ class ksUnit(Unit):
 
 # %% ----------------------------------------------------------------
 # Spiking Population class (simultaneously recorded, storing individual spiketimes)
-
-# THis should be SpikePop, then we have RatePop and PseudoPop
-# functions/methods? to convert SpikePop to RatePop and RatePop to PseuudoPop (stack)
 
 @dataclass
 class Population:
@@ -189,26 +189,24 @@ class RatePop:
         
         filtered_data = deepcopy(self)
         
-        # one entry per unit
+        # one entry per unit
         filtered_data.unit_session = self.unit_session[inds]
         filtered_data.area = self.area[inds]
         filtered_data.clus_group = self.clus_group[inds]
         filtered_data.firing_rates = list(map(lambda x: x[inds, ...], self.firing_rates))
         
-        # one entry per session
+        # one entry per session
         sessions = np.unique(self.unit_session).tolist()
-        filtered_data.conds = [self.conds[s] for s in sessions]
         
-        if self.rel_events:
-            filtered_data.rel_events =  [self.rel_events[s] for s in sessions]
+        if isinstance(self.conds, list):
+            filtered_data.conds = [self.conds[s] for s in sessions]
+        
+        if self.rel_events and isinstance(self.rel_events, list):
+             filtered_data.rel_events =  [self.rel_events[s] for s in sessions]
 
         return filtered_data
     
     
-    def recode_conditions(self, columns: Sequence, old_values: Sequence, new_values: Union[list, int, float]):
-        self.conds = recode_conditions(columns, old_values, new_values)
-        
-        
     def num_trials_per_unit(self, by_conds=False, cond_groups=None) -> tuple[np.ndarray, pd.DataFrame]:
         # return the number of trials for each unique condition in the population
         
@@ -232,7 +230,6 @@ class RatePop:
         return unit_trial_count, cond_groups
         
         
-    
     def concat_alignments(self, insert_blank: bool = False, warning: bool = False):
         
         if self.sep_alignments:
@@ -424,7 +421,7 @@ class RatePop:
         
         
     def flip_rates(self, unit_inds: np.ndarray[Union[bool, int]], col: Union[str, np.ndarray]) -> None:
-        """Flip firing rates for specified units for condition in col (e.g. recoding choice firing rate as pref/null)
+        """Flip firing rates for specified units for condition in col (e.g. recoding firing rates for right/left as pref/null)
 
         Args:
             unit_inds (_type_): array of ints or bools referencing which units to flip
@@ -444,8 +441,8 @@ class RatePop:
         # flip 'em (just the units selected in unit_inds)
 
         these_units = self.firing_rates[unit_inds, :, :]
-        val0, val1 = col==val_flip[0], col==val_flip[1]
-        
+        val0, val1 = col == val_flip[0], col == val_flip[1]
+
         # this works to simply interchange them, although definitely need some unit tests here to make sure it works properly!
         these_units[:, val0, :], these_units[:, val1, :] = \
             these_units[:, val1, :], these_units[:, val0, :]
@@ -456,7 +453,9 @@ class RatePop:
             self.split_alignments()
         
         
-# %% externally defined util functions
+        
+# %% ----------------------------------------------------------------
+# externally defined util functions
     
 def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: Sequence[float], 
                       new_values: Union[Sequence[float], float]):
@@ -516,6 +515,8 @@ def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence,
         
     return reltimes
 
+
+
 #@Timer(name='trial_psth_timer', initial_text='trial_psth ')
 def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                trange = np.array([np.float64, np.float64]),
@@ -560,15 +561,14 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             relative to alignment event. Useful for plotting spike rasters
     """
 
-    # TODO IMPLEMENT STEPSIZE TO ALLOW OVERLAPPING BINS!!
-    # TODO handle nTr == 0
-
     nTr = align.shape[0]
-
-    if nTr > 0:
-        if align.ndim == 2:
-            align = np.sort(align, axis=1)
-            ev_order = np.argsort(align, axis=1)
+    
+    if nTr == 0:
+        return None
+    
+    if align.ndim == 2:
+        align = np.sort(align, axis=1)
+        ev_order = np.argsort(align, axis=1)
             # TODO assertion here that ev_order is consistent on every trial?
             which_ev = ev_order[0, 0]  # align to this event
         else:  # only one event provided, tile it to standardize for later
@@ -587,7 +587,7 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     durs = tr_ends - tr_starts
 
     # compute 'corrected' tStart and tEnd based on align_ev input
-    # TODO add explanation for this
+    # TODO add explanation for this
     if which_ev == 1:
         tstarts_rel = tr_starts - align[:, 1]
         tstart_rel = np.min(tstarts_rel)
@@ -605,7 +605,7 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     tr_ends = align[:, 1] + tend_rel
 
     # if smoothing firing rates, extend the range a bit to use real spike counts for smoothing at the edges
-    # TODO this is causing a mismatch in lengths later when trying to cut down, need to FIX this
+    # TODO this is causing a mismatch in lengths later when trying to cut down, need to FIX this
     # if sm_params:
     #     tstart_orig, tend_orig = tstart_rel, tend_rel
     #     tstart_rel -= sm_params['width']/2
@@ -830,7 +830,6 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
 
         # need to call argsort twice! https://stackoverflow.com/questions/31910407/
         order = np.argsort(np.argsort(ic)).tolist()
-
 
         # get color for each trial, based on heading, convert to list
         colors = cmap(hue_norm(cond_df[hue]).data.astype('float'))

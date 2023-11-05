@@ -73,6 +73,7 @@ def decode_outcome(f_rates: np.ndarray, condlist: pd.DataFrame,
                         nan_idx = np.isnan(fr)
                         if nan_idx.sum() == len(fr) or len(np.unique(y_inds[~nan_idx]))==1 or np.isnan(pos_label[u]):
                             continue
+                        
                         y_inds_good, fr_good = y_inds[~nan_idx], fr[~nan_idx]
                         
                         # flip left and right (assume all labels are 0 or 1)
