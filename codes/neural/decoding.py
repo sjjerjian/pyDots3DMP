@@ -49,7 +49,6 @@ def decode_outcome(f_rates: np.ndarray, condlist: pd.DataFrame,
             pos_label = np.array([pos_label]*f_rates.shape[0])
         
         
-    
     if cond_groups is not None:
         if cond_cols is None:
             cond_cols = cond_groups.columns[~cond_groups.columns.str.contains(outcome_col)]
@@ -59,7 +58,8 @@ def decode_outcome(f_rates: np.ndarray, condlist: pd.DataFrame,
         ic = np.zeros(f_rates.shape[1])
         nC, cg = 1, None
 
-    # result is units x conditions x time if decoding individually
+    # result is units x conditions x time if decoding individually,
+    # otherwise just conditions x time
     if decode_as_population:
         outcome_score = np.full((nC, f_rates.shape[2]), np.nan)
     else:

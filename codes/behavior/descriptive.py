@@ -24,7 +24,7 @@ from behavior.preprocessing import prop_se, cont_se, gaus
 
 def behavior_means(df, by_conds='heading', long_format=True):
 
-    # TODO fix this up, we 
+    # TODO fix this up 
     # p_right = _groupbyconds(df, by_conds, 'choice', prop_se)
     # p_high = _groupbyconds(df, by_conds, 'PDW', prop_se)
     # mean_rt = _groupbyconds(df, by_conds, 'RT', cont_se)

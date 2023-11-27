@@ -15,14 +15,17 @@
 # %% ----------------------------------------------------------------
 # load data (and general imports)
 
+import sys
+sys.path.append('../pydots3DMP')
+
 import numpy as np
 import pandas as pd
 
 from pathlib import PurePath
 
-from codes.behavior.preprocessing import dots3DMP_create_conditions
+from behavior.preprocessing import dots3DMP_create_conditions
 from neural.dots3DMP_build_dataset import build_rate_population
-from neural.load_utils import load_dataset, quick_load
+from neural.load_utils import quick_load
 from neural.rate_utils import pref_hdg_dir
 from neural.decoding import decode_outcome
 
@@ -169,7 +172,7 @@ def build_pseudopop_cond_psth(data, stacked, averaged):
                 'sigma': 0.05, 
                 }
 
-    task_pp = build_rate_population(popns=data['Task'], tr_table=tr_choice_wager,
+    task_pp = build_rate_population(popns=data['Task'], tr_tab=tr_choice_wager,
                                     t_params=t_params, smooth_params=sm_params,
                                     event_time_groups=['modality'],
                                     stacked=stacked, return_averaged=averaged)

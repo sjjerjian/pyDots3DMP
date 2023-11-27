@@ -72,7 +72,7 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray, mu: np.ndarr
     sigma = np.array([[1, rho], [rho, 1]])
 
     nx, ny = xmesh.shape
-    pdf_result = np.empty((len(tvec), nx, ny))
+    pdf_result = np.zeros((len(tvec), nx, ny))
 
     #xy_mesh = np.dstack((xmesh, ymesh))
 

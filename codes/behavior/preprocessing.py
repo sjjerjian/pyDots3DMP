@@ -211,22 +211,34 @@ def add_trial_outcomes(trial_table: pd.DataFrame, outcomes: dict = None) -> pd.D
     return new_trial_table
 
 
-def dots3DMP_create_conditions(conds, labels):
+def dots3DMP_create_conditions(conds_dict: dict[str, list], cond_labels=None) -> pd.DataFrame:
     
-    stim_conds = {key: conds[key] if key in conds else [np.nan] for key in ['mods', 'cohs', 'hdgs', 'deltas']}
-    outcomes = {key: conds[key] for key in ['choice', 'PDW', 'oneTargConf'] if key in conds}
+    # TODO allow user to set stim and res_keys
+    stim_keys = ['mods', 'cohs', 'deltas', 'hdgs']    
+    res_keys = ['choice', 'correct', 'PDW', 'oneTargConf']
     
-    trial_table = dots3DMP_create_trial_list(**stim_conds, nreps=1, shuff=False)
-    trial_table.dropna(axis=1, how="any", inplace=True)
+    ss_dict = {key: conds_dict.get(key, [0]) for key in stim_keys}
+    conds = dots3DMP_create_trial_list(**ss_dict, nreps=1, shuff=False)
+                
+    rr_dict = {key: conds_dict.get(key, [0]) for key in res_keys}
+    conds = conds.pipe(add_trial_outcomes, rr_dict)
     
-    trial_table = add_trial_outcomes(trial_table, outcomes)
-    trial_table.dropna(axis=1, how="any", inplace=True)
+    indices = [idx for idx, el in enumerate(stim_keys+res_keys)
+               if el in conds_dict]
+    
+    conds = conds[conds.columns[indices]]
+    
+    if cond_labels:
+        conds.columns = cond_labels
 
-    trial_table.columns = labels
-    
-    return trial_table
+    return conds
     
     
-
+    
+    
+                               
+    
+    
+        
 
 
