@@ -211,4 +211,22 @@ def add_trial_outcomes(trial_table: pd.DataFrame, outcomes: dict = None) -> pd.D
     return new_trial_table
 
 
+def dots3DMP_create_conditions(conds, labels):
+    
+    stim_conds = {key: conds[key] if key in conds else [np.nan] for key in ['mods', 'cohs', 'hdgs', 'deltas']}
+    outcomes = {key: conds[key] for key in ['choice', 'PDW', 'oneTargConf'] if key in conds}
+    
+    trial_table = dots3DMP_create_trial_list(**stim_conds, nreps=1, shuff=False)
+    trial_table.dropna(axis=1, how="any", inplace=True)
+    
+    trial_table = add_trial_outcomes(trial_table, outcomes)
+    trial_table.dropna(axis=1, how="any", inplace=True)
+
+    trial_table.columns = labels
+    
+    return trial_table
+    
+    
+
+
 

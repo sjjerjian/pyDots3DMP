@@ -309,10 +309,10 @@ class RatePop:
             if t_range is None:
                 ind0, ind1 = 0, len(self.timestamps[t_int])
             else:
-            ind0 = np.argmin(np.abs(self.timestamps[t_int] - t_range[0]))
-            ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
+                ind0 = np.argmin(np.abs(self.timestamps[t_int] - t_range[0]))
+                ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
         
-        # subtract average baseline
+            # subtract average baseline
             bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
             
             if standardize:                
@@ -569,21 +569,21 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     if align.ndim == 2:
         align = np.sort(align, axis=1)
         ev_order = np.argsort(align, axis=1)
-            # TODO assertion here that ev_order is consistent on every trial?
-            which_ev = ev_order[0, 0]  # align to this event
-        else:  # only one event provided, tile it to standardize for later
-            align = np.expand_dims(align, axis=1)
-            align = np.tile(align, (1, 2))
-            which_ev = 0
+        # TODO assertion here that ev_order is consistent on every trial?
+        which_ev = ev_order[0, 0]  # align to this event
+    else:  # only one event provided, tile it to standardize for later
+        align = np.expand_dims(align, axis=1)
+        align = np.tile(align, (1, 2))
+        which_ev = 0
 
-        nantrs = np.any(np.isnan(align), axis=1)
-        if np.sum(nantrs) > 0:
-            print(f'Dropping {np.sum(nantrs)} trials with missing alignment event')
-        align = align[~nantrs, :]
-        nTr = align.shape[0]  # recalculate after bad trs removed
+    nantrs = np.any(np.isnan(align), axis=1)
+    if np.sum(nantrs) > 0:
+        print(f'Dropping {np.sum(nantrs)} trials with missing alignment event')
+    align = align[~nantrs, :]
+    nTr = align.shape[0]  # recalculate after bad trs removed
 
-        tr_starts = align[:, 0] + trange[0]
-        tr_ends = align[:, 1] + trange[1]
+    tr_starts = align[:, 0] + trange[0]
+    tr_ends = align[:, 1] + trange[1]
     durs = tr_ends - tr_starts
 
     # compute 'corrected' tStart and tEnd based on align_ev input
@@ -631,42 +631,42 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
         fr_out = np.full(nTr, np.nan)
         x = durs
 
-        spktimes_aligned = []
-        if spiketimes.any():
-            itr_start, itr_end = 0, nTr
+    spktimes_aligned = []
+    if spiketimes.any():
+        itr_start, itr_end = 0, nTr
 
-            if not all_trials:
-                itr_start = np.argmin(np.abs(tr_starts - spiketimes[0]))
-                itr_end = np.argmin(np.abs(tr_ends - spiketimes[-1]))
+        if not all_trials:
+            itr_start = np.argmin(np.abs(tr_starts - spiketimes[0]))
+            itr_end = np.argmin(np.abs(tr_ends - spiketimes[-1]))
 
-            for itr in range(0, itr_start):
-                spktimes_aligned.append(np.empty(1))
+        for itr in range(0, itr_start):
+            spktimes_aligned.append(np.empty(1))
 
-            for itr in range(itr_start, itr_end+1):
-                spk_inds = np.logical_and(spiketimes >= tr_starts[itr],
-                                          spiketimes <= tr_ends[itr])
+        for itr in range(itr_start, itr_end+1):
+            spk_inds = np.logical_and(spiketimes >= tr_starts[itr],
+                                        spiketimes <= tr_ends[itr])
 
-                if binsize == 0:
-                    fr_out[itr] = np.sum(spk_inds)
+            if binsize == 0:
+                fr_out[itr] = np.sum(spk_inds)
 
+        else:
+            inds_t = spiketimes[spk_inds] - align[itr, which_ev]
+            
+            if stepsize is None:
+                fr_out[itr, :], _ = np.histogram(inds_t, x)
             else:
-                inds_t = spiketimes[spk_inds] - align[itr, which_ev]
-                
-                if stepsize is None:
-                    fr_out[itr, :], _ = np.histogram(inds_t, x)
-                else:
-                    raise NotImplementedError('Stepsize for producing overlapping binned spike counts is not yet implemented')
+                raise NotImplementedError('Stepsize for producing overlapping binned spike counts is not yet implemented')
 
-                # save the individual times (relative to alignment event) for raster plots
-                spktimes_aligned.append(inds_t)
+            # save the individual times (relative to alignment event) for raster plots
+            spktimes_aligned.append(inds_t)
 
-                # set nans outside the range of align/trange for each trial
-                if which_ev == 0:
-                    end_pos = np.argmin(abs(x - tends_rel[itr]))
-                    fr_out[itr, end_pos:] = np.nan
-                elif which_ev == 1:
-                    start_pos = np.argmin(abs(x - tstarts_rel[itr]))
-                    fr_out[itr, :start_pos] = np.nan
+            # set nans outside the range of align/trange for each trial
+            if which_ev == 0:
+                end_pos = np.argmin(abs(x - tends_rel[itr]))
+                fr_out[itr, end_pos:] = np.nan
+            elif which_ev == 1:
+                start_pos = np.argmin(abs(x - tstarts_rel[itr]))
+                fr_out[itr, :start_pos] = np.nan
 
         for itr in range(itr_end+1, nTr):
             spktimes_aligned.append(np.empty(1))

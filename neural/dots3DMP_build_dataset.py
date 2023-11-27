@@ -87,17 +87,17 @@ def split_pseudopop_decorator(create_pp_func):
 
 
 # @split_pseudopop_decorator  # this won't work with unstacked...
-def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict = None, 
+def build_rate_population(popns, tr_tab, t_params: dict, smooth_params: dict = None, 
                     event_time_groups: list = None, stacked=True, return_averaged=True) -> RatePop:
     
     
-    num_sessions, num_alignments = len(popn_dfs), len(t_params['align_ev'])
+    num_sessions, num_alignments = len(popns), len(t_params['align_ev'])
 
     # --------------------------------
     # extract firing rates as unit x conditions x times, from each recording population's spiking activity
     
     # TODO alternative version which takes already saved tuple of inputs
-    fr_list, unitlabels, conds_dfs, tvecs, _ = zip(*popn_dfs.apply(
+    fr_list, unitlabels, conds_dfs, tvecs, _ = zip(*popns.apply(
         lambda x: x.get_firing_rates(align_ev=t_params['align_ev'], trange=t_params['trange'],
                                      binsize=t_params['binsize'], sm_params=smooth_params,
                                      condlabels=tr_tab.columns)
@@ -131,7 +131,7 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
     # --------------------------------
     # calculate median timing of "other events" relative to alignment event, for each session
     
-    rel_event_times = [None for _ in popn_dfs]
+    rel_event_times = [None for _ in popns]
     if 'other_ev' in t_params:
         
         cg_events = None
@@ -200,12 +200,12 @@ def build_rate_population(popn_dfs, tr_tab, t_params: dict, smooth_params: dict 
             firing_rates=stacked_frs,
             timestamps=t_unq,
             psth_params=t_params,
-        rel_events=rel_event_times,
-        conds=conds_dfs,
-        clus_group=np.hstack(unitlabels),
-        area=area,
-        unit_session=u_idx,
-    )
+            rel_events=rel_event_times,
+            conds=conds_dfs,
+            clus_group=np.hstack(unitlabels),
+            area=area,
+            unit_session=u_idx,
+        )
 
     return pseudo_pop
 
