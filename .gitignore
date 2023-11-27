@@ -2,11 +2,10 @@
 .idea/
 *.xml
 *.pkl
-*/pydots3DMP.egg-info/*
 *.pyc
-
+*.png
+codes/build
+codes/.vscode/
 codes/pydots3DMP.egg-info/
-
-results/
 
 data/
