@@ -154,6 +154,7 @@ class RatePop:
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
     
     sep_alignments: bool = field(default=True, repr=False)
+    time_reindexed: bool = field(default=False, repr=False)
     rates_averaged: bool = field(default=False, repr=False)
     simul_recorded: bool = field(default=True, repr=False)
     
@@ -174,6 +175,11 @@ class RatePop:
     def get_unique_areas(self):
         return np.unique(self.area).tolist()
     
+    
+    def split(self):
+        # TODO allow splitting single RatePop into simulatneously recorded 
+        if unit_session is not None:
+            pass
     
     def filter_units(self, inds: np.ndarray):
         """
@@ -311,7 +317,7 @@ class RatePop:
             else:
                 ind0 = np.argmin(np.abs(self.timestamps[t_int] - t_range[0]))
                 ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
-        
+
             # subtract average baseline
             bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
             
@@ -446,7 +452,7 @@ class RatePop:
         # this works to simply interchange them, although definitely need some unit tests here to make sure it works properly!
         these_units[:, val0, :], these_units[:, val1, :] = \
             these_units[:, val1, :], these_units[:, val0, :]
-        
+
         self.firing_rates[unit_inds, :, :] = these_units
         
         if flag_sep:
@@ -490,8 +496,9 @@ def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence,
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
 
-    reltimes = {k: [] for k in align}
-    for aev, oev in zip(align, others):
+    align_first = [al[0] if isinstance(al, list) else al for al in align]
+    reltimes = {k: [] for k in align_first}
+    for aev, oev in zip(align_first, others):
 
         if events.loc[good_trs, aev].isna().all(axis=0).any():
             raise ValueError(aev)
@@ -528,12 +535,12 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     ----------
         spiketimes : numpy array
             1-D numpy array, containing the time of each spike for one unit.
-    align : numpy array
-        the times of the desired event(s) spikes should be aligned to,
-        1 row per trial. Units should match spiketimes
-        if 1-D, tstart and tend will be relative to the same event
-        if 2-D, tstart will be relative to the first event, tend to the second
-    trange : TYPE
+        align : numpy array
+            the times of the desired event(s) spikes should be aligned to,
+            1 row per trial. Units should match spiketimes
+            if 1-D, tstart and tend will be relative to the same event
+            if 2-D, tstart will be relative to the first event, tend to the second
+        trange : TYPE
             2-length 1-D numpy array, specifying start and end time
             relative to align_ev columns (again, units should be consistent)
         binsize : FLOAT, optional
@@ -544,18 +551,18 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
         sm_params : DICT, optional
             DESCRIPTION. The default is {}.
         all_trials : BOOLEAN, optional
-        DESCRIPTION. The default is False.
-    normalize : BOOLEAN, optional
-        normalize counts by time to obtain rate. The default is True.
+            DESCRIPTION. The default is False.
+        normalize : BOOLEAN, optional
+            normalize counts by time to obtain rate. The default is True.
 
     Returns
     -------
-    fr_out : numpy array
-        if binsize>0, ntrials x numbins array containing spike count or rate
-        otherwise, 1-D array of total count or average rate on each trial
-    x : numpy array
-        if binsize>0, 1-D array containing the mid-time of each histogram bin
-        otherwise, 1-D array of total time duration of each trial interval
+        fr_out : numpy array
+            if binsize>0, ntrials x numbins array containing spike count or rate
+            otherwise, 1-D array of total count or average rate on each trial
+        x : numpy array
+            if binsize>0, 1-D array containing the mid-time of each histogram bin
+            otherwise, 1-D array of total time duration of each trial interval
         spktimes_aligned : list
             list of numpy arrays, containing individual spike times on each trial,
             relative to alignment event. Useful for plotting spike rasters
@@ -692,9 +699,9 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             if normalize:
                 fr_out /= binsize
 
-            elif binsize == 0:
-                if normalize:
-                    fr_out /= x
+        elif binsize == 0:
+            if normalize:
+                fr_out /= x
 
     return fr_out, x, spktimes_aligned
 

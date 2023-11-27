@@ -64,8 +64,35 @@ def build_rec_popn(subject, rec_date, rec_info, data) -> Population:
 
     return rec_popn
 
+
 # %% ----------------------------------------------------------------
-# buld rate population (concatenated sessions)
+# build rate population
+
+    """
+    A RatePopulation object can contain data from a single ("simultaneous") 
+    or multiple ("pseudo-population") recording populations.
+    
+    Firing rates arrays are units x nconds/ntrials x time, there can be 
+    a list of arrays if spikes are aligned to multiple behavioural events.
+    Firing rates can be interchanged between a list of alignments and a concatenated 
+    array using split_alignments and concat_alignments.
+    
+    A RatePopulation's firing rates can be single-trial based or trial-averaged.
+    Single-trial based firing rates will have an associated conditions dataframe
+    that is ntrials in length, and the trial-averaged RatePopulation conditions
+    dataframe will be nconds in length.
+    
+    If multiple simultaneous populations are stacked to create a PseudoPopulation,
+    and trials are averaged, there will be a single conditions dataframe, since all
+    trial-averaged neural firing rates are associated with the same conditions list.
+    
+    If trials are not averaged, then a list of conditions dataframes will be kept,
+    one for each individual session. 
+    
+    TODO add methods/functions to move between these 4 options after creation
+    (stacked to unstacked, unstacked to stacked, and single-trials to averaged).
+    
+    """
 
 def split_pseudopop_by_area(pseudopop: RatePop):
     
@@ -86,37 +113,49 @@ def split_pseudopop_decorator(create_pp_func):
     return wrapper
 
 
-# @split_pseudopop_decorator  # this won't work with unstacked...
-def build_rate_population(popns, tr_tab, t_params: dict, smooth_params: dict = None, 
-                    event_time_groups: list = None, stacked=True, return_averaged=True) -> RatePop:
-    
+def build_rate_population(popns: Union[Sequence, pd.Series], tr_table: pd.DataFrame, t_params: dict, smooth_params: dict = None, 
+                    event_time_groups: list = None, stacked=True, return_averaged=True) -> Union[RatePop, list]:
+    """Build a RatePop of firing rates given user-specified parameters (for PSTH alignment, resolution, and task conditions)
+
+    Args:
+        popns (_type_): sequence of Population Objects containing spike times for simulataneously recorded units, and task event information
+        tr_table (_type_): dataframe of unique trial conditions
+        t_params (dict): PSTH parameters - alignment event(s), time ranges, binsize, other event(s) for relative timing
+        smooth_params (dict, optional): PSTH smoothing parameters - passed to get_firing_rates and trial_psth. Defaults to None.
+        event_time_groups (list, optional): What grouping of conditions to use for calculating relative event timing. Defaults to None.
+        stacked (bool, optional): stack data across sessions into single RatePop. Defaults to True.
+        return_averaged (bool, optional): If true, calculate trial-average firing rates for each condition in tr_table. 
+        If false, return single trial data for all trials matching a condition in tr_table. Defaults to True.
+
+    Returns:
+        list, or single Rate Pop: if stacked, returns a single RatePopulation object, otherwise, returns a list of RatePop objects - one per entry in popns
+    """
     
     num_sessions, num_alignments = len(popns), len(t_params['align_ev'])
 
     # --------------------------------
     # extract firing rates as unit x conditions x times, from each recording population's spiking activity
     
+    t_params_a = {k: v for k, v in t_params.items() if k in ['align_ev', 'trange', 'binsize', 'stepsize']}
     # TODO alternative version which takes already saved tuple of inputs
     fr_list, unitlabels, conds_dfs, tvecs, _ = zip(*popns.apply(
-        lambda x: x.get_firing_rates(align_ev=t_params['align_ev'], trange=t_params['trange'],
-                                     binsize=t_params['binsize'], sm_params=smooth_params,
-                                     condlabels=tr_tab.columns)
+        lambda x: x.get_firing_rates(**t_params_a, sm_params=smooth_params, condlabels=tr_table.columns)
         )
     )
     
     # --------------------------------
-    # average trials within each condition specified in tr_tab
+    # average trials within each condition specified in tr_table
     if return_averaged:
-        if t_params['binsize'] == 0:
-            rates_cat, _, len_intervals = concat_aligned_rates(fr_list)
-        else:
+        if t_params['binsize'] > 0:
             rates_cat, _, len_intervals = concat_aligned_rates(fr_list, tvecs)
+        else:
+            rates_cat, _, len_intervals = concat_aligned_rates(fr_list)
 
         cond_frs, cond_groups = [], []
         for f_in, cond in zip(rates_cat, conds_dfs):
 
-            # avg firing rate over time across units, each cond, per session
-            f_out, _, cg = condition_averages(f_in, cond, cond_groups=tr_tab)
+            # avg firing rate over time/alignments across units, for each cond
+            f_out, _, cg = condition_averages(f_in, cond, cond_groups=tr_table)
             cond_frs.append(f_out)
             cond_groups.append(cg)
 
@@ -137,11 +176,11 @@ def build_rate_population(popns, tr_tab, t_params: dict, smooth_params: dict = N
         cg_events = None
         if return_averaged:
             if event_time_groups:
-                cg_events = tr_tab[event_time_groups].drop_duplicates()
+                cg_events = tr_table[event_time_groups].drop_duplicates()
             else:
-                cg_events = tr_tab
+                cg_events = tr_table
                 
-        rel_event_times = popn_dfs.apply(
+        rel_event_times = popns.apply(
             lambda x: x.popn_rel_event_times(align=t_params['align_ev'],
                                              others=t_params['other_ev'],
                                              cond_groups=cg_events
@@ -206,7 +245,7 @@ def build_rate_population(popns, tr_tab, t_params: dict, smooth_params: dict = N
             area=area,
             unit_session=u_idx,
         )
-
+        
     return pseudo_pop
 
 
@@ -308,7 +347,8 @@ def get_cluster_label(clus_group, labels=['unsorted', 'mua', 'good', 'noise']):
         return None
 
 
-# %% MAIN
+# %% ----------------------------------------------------------------
+# build 'raw' dataset
 
 def create_dataset(data_file: str, info_file: str, save_file: bool = True) -> pd.DataFrame:
     

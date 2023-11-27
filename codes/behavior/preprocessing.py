@@ -144,8 +144,8 @@ def format_onetargconf(df: pd.DataFrame, remove_one_targ: bool = True) -> pd.Dat
 def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
                                nreps: int = 1, shuff: bool = True) -> pd.DataFrame:
 
-    # if shuff:
-    #     np.random.seed(42)  # for reproducibility
+    if isinstance(shuff, int):
+        np.random.seed(shuff)  # for reproducibility
 
     num_hdg_groups = any([1 in mods]) + any([2 in mods]) * len(cohs) + \
         any([3 in mods]) * len(cohs) * len(deltas)
@@ -188,8 +188,10 @@ def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
     ntrials = len(trial_table)
 
     if shuff:
-        # TODO allow rng input
-        trial_table = trial_table[np.random.permutation(ntrials)]
+        if isinstance(shuff, int):
+            trial_table = trial_table[np.random.default_rng(shuff).permutation(ntrials)]
+        else:
+            trial_table = trial_table[np.random.permutation(ntrials)]
 
     trial_table = pd.DataFrame(trial_table, columns=['modality', 'coherence', 'delta', 'heading'])
 
@@ -198,6 +200,12 @@ def dots3DMP_create_trial_list(hdgs: list, mods: list, cohs: list, deltas: list,
 
 def add_trial_outcomes(trial_table: pd.DataFrame, outcomes: dict = None) -> pd.DataFrame:
 
+    """Replicate a trial table of stimulus conditions N times to include possible trial outcomes
+    e.g. choice and wager
+
+    Returns:
+        pd.DataFrame: final trial conditions list, with additional columns for trial outcomes
+    """
     if outcomes is None:
         outcomes = {'choice': [0, 1], 'PDW': [0, 1], 'oneTargConf': [0]}
 
@@ -240,5 +248,6 @@ def dots3DMP_create_conditions(conds_dict: dict[str, list], cond_labels=None) ->
     
     
         
-
-
+                               
+    
+    
