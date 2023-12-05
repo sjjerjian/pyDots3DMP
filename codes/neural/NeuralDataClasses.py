@@ -526,7 +526,7 @@ def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence,
 #@Timer(name='trial_psth_timer', initial_text='trial_psth ')
 def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                trange = np.array([np.float64, np.float64]),
-               binsize: float = 0.05, stepsize: Optional[float] = None, 
+               binsize: float = 0.05,
                sm_params: Optional[dict] = None,
                all_trials: bool = False, normalize: bool = True) -> tuple[np.ndarray, np.ndarray, list]:
     """
@@ -544,9 +544,6 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             relative to align_ev columns (again, units should be consistent)
         binsize : FLOAT, optional
             binsize for spike count histogram. The default is 0.05 (seconds) i.e. 50ms.
-        stepsize: FLOAT, optional
-            stepsize for spike count histogram. The default is None, which means == binsize
-            stepsize < binsize will yield overlapping bins
         sm_params : DICT, optional
             DESCRIPTION. The default is {}.
         all_trials : BOOLEAN, optional
@@ -616,23 +613,19 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     #     tstart_orig, tend_orig = tstart_rel, tend_rel
     #     tstart_rel -= sm_params['width']/2
     #     tend_rel += sm_params['width']/2
-        
+
     if binsize > 0:
-        # TODO allow for stepsize overlap
-        if stepsize is None:
-            if trange[0] < 0 and trange[1] > 0:
-                # set forwards and backwards bins separately first, to ensure that time 0 is one of the bin edges
-                x0 = np.arange(0, tstart_rel-binsize, -binsize)
+        if trange[0] < 0 and trange[1] > 0:
+            # set forwards and backwards bins separately first, to ensure that time 0 is one of the bin edges
+            x0 = np.arange(0, tstart_rel-binsize, -binsize)
                 x1 = np.arange(0, tend_rel+binsize+1e-3, binsize)
                 x = np.hstack((x0[::-1, ], x1[1:, ]))
             else:
                 x = np.arange(tstart_rel, tend_rel+binsize, binsize)
 
-            fr_out = np.full([nTr, x.shape[0]-1], np.nan)
-            
-        else:
-            raise NotImplementedError('Stepsize for producing overlapping binned spike counts is not yet implemented')
-            #TODO set bins and fr_out for stepsize?
+        fr_out = np.full([nTr, x.shape[0]-1], np.nan)
+
+
     else:
         fr_out = np.full(nTr, np.nan)
         x = durs
@@ -655,16 +648,13 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             if binsize == 0:
                 fr_out[itr] = np.sum(spk_inds)
 
-        else:
-            inds_t = spiketimes[spk_inds] - align[itr, which_ev]
-            
-            if stepsize is None:
-                fr_out[itr, :], _ = np.histogram(inds_t, x)
             else:
-                raise NotImplementedError('Stepsize for producing overlapping binned spike counts is not yet implemented')
+                inds_t = spiketimes[spk_inds] - align[itr, which_ev]
 
-            # save the individual times (relative to alignment event) for raster plots
-            spktimes_aligned.append(inds_t)
+                fr_out[itr, :], _ = np.histogram(inds_t, x)
+
+                # save the individual times (relative to alignment event) for raster plots
+                spktimes_aligned.append(inds_t)
 
             # set nans outside the range of align/trange for each trial
             if which_ev == 0:
@@ -681,10 +671,12 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
             x = x[:-1] + np.diff(x)/2  # shift 'x' values to bin centers
 
             if sm_params:
+                # TODO allow user to provide custom kernel
                 if 'binsize' not in sm_params:
                     sm_params['binsize'] = binsize
+
                 fr_out, sm_nbins = smooth_fr(fr_out, params=sm_params)
-                
+
                 # alternative?
                 st = sm_nbins // 2
                 en = len(x) - 1 - (st+1)
@@ -705,26 +697,31 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     return fr_out, x, spktimes_aligned
 
 
-def smooth_fr(raw_fr, params: Optional[dict] = None) -> tuple[np.ndarray, int]:
-        
+def smooth_fr(raw_fr, params: Optional[dict] = None, kernel: Optional[np.ndarray]=None) -> tuple[np.ndarray, int]:
 
+    # TODO set defaults for params even if only some are provided
     if params is None:
-        params = {'type': 'boxcar', 'binsize': 0.02,
-                  'width': 0.2}
+        params = {'type': 'boxcar', 'binsize': 0.02, 'width': 0.2, 'normalize': True}
 
-    if params['type'] == 'boxcar':
-        
-        N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
-        win = np.ones(N) / N
+    if kernel is None:
+        if params['type'] == 'boxcar':
 
-    elif params['type'] == 'gaussian':
-        
-        N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
-        alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
-        win = gaussian(N, std=alpha)
-        win /= np.sum(win)
-   
-    elif params['type'] == 'causal':
+            N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
+            win = np.ones(N)
+
+            if params['normalize']:
+                win /= N
+
+        elif params['type'] == 'gaussian':
+
+            N = int(np.ceil(params['width'] / params['binsize']))  # width, in bins
+            alpha = (N - 1) / (2 * (params['sigma'] / params['binsize']))
+            win = gaussian(N, std=alpha)
+
+            if params['normalize']:
+                win /= np.sum(win)
+
+        elif params['type'] == 'causal':
         
         raise NotImplementedError('Not implemented yet')
     
@@ -734,12 +731,15 @@ def smooth_fr(raw_fr, params: Optional[dict] = None) -> tuple[np.ndarray, int]:
             
         # rise_time, decay_time = width
         # win = np.arange(0, rise_time + decay_time, params['binsize'])
-        # win = (1 - np.exp(win / rise_time)) * np.exp(win / decay_time)
-        # win /= np.sum(win)  # re-normalize here
-        
+            # win = (1 - np.exp(win / rise_time)) * np.exp(win / decay_time)
+            # win /= np.sum(win)  # re-normalize here
+
+    else:
+        win = kernel
+
     # smooth along time, which is axis 1!!!
     smoothed_fr = convolve1d(raw_fr, win, axis=1, mode='nearest')
-    
+
     return smoothed_fr, N
 
 
@@ -768,7 +768,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
         # trial_psth in list comp is going to generate a list of tuples
         # the zip(*iterable) syntax allows us to unpack the tuples into separate variables
         spike_counts, t_vec, _ = \
-            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, stepsize, sm_params)) for unit in units])
+            zip(*[(trial_psth(unit.spiketimes, align, t_r, binsize, sm_params)) for unit in units])
 
         rates.append(np.asarray(spike_counts))
         tvecs.append(np.asarray(t_vec[0]))
