@@ -271,9 +271,8 @@ class RatePop:
                 print("Firing rates already a list of alignments, skipping...\n")
 
         return self
-    
-    
-    def demean(self, t_int=None, t_range=None, across_conds=True, standardize=True, return_split=True):
+
+    def demean_across_time(self, t_int=None, t_range=None, across_conds=True, standardize=True, return_split=True):
         """
         t_int: interval to use as baseline - if None, use all (i.e. assume concatenated, or do the concatenation)
         """
@@ -337,9 +336,9 @@ class RatePop:
             self.split_alignments()
             
         return self
-                
-    
-    def normalize(self, t_int=None, t_range=None, across_conds: bool = True, softmax_const: int = 0):
+
+
+    def normalize_across_time(self, t_int=None, t_range=None, across_conds: bool = True, softmax_const: int = 0):
 
         # only separate alignments at end if they were separated to begin with
         flag_sep = self.sep_alignments
