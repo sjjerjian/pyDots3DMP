@@ -91,7 +91,7 @@ def condition_index(condlist: pd.DataFrame, cond_groups: Optional[pd.DataFrame]=
     return the trial index for each condition
     """
     if cond_groups is None:
-        # cond_groups not specified, use all unique trial types
+        # cond_groups not specified, use all unique trial types
         cond_groups, ic = np.unique(condlist.to_numpy('float64'), axis=0, return_inverse=True)
         cond_groups = pd.DataFrame(cond_groups, columns=condlist.columns)
 
@@ -158,11 +158,11 @@ def pref_hdg_dir(f_rates: np.ndarray, condlist: pd.DataFrame, cond_groups: Optio
 
         fr_c = f_rates[:, ic==c, ...]
         fr_c[np.isnan(fr_c)] = 0
-        
-        # no trials of that condition
+
+        # no trials of that condition
         if fr_c.sum() == 0:
             continue
-        
+
         hdg_c = condlist.loc[ic==c, 'heading'].values
         
         r_minus_l = np.nansum(fr_c[:, hdg_c > 0, ...], axis=1) - np.nansum(fr_c[:, hdg_c < 0, ...], axis=1)

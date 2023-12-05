@@ -21,7 +21,7 @@ def load_dataset(filename: str, pathname: Optional[str], pars: Optional[list]) -
     
     return data
 
-def quick_load_lucio_data():
+def quick_load():
     data_folder = '/Users/stevenjerjian/Desktop/FetschLab/Analysis/data/lucio_neuro_datasets/'
     data = load_dataset('lucio_20220512-20230602_neuralData.pkl', data_folder, pars=['Tuning', 'Task'])
     

@@ -18,7 +18,6 @@ from datetime import date
 
 from dataclasses import dataclass, field
 from neural.rate_utils import *
-
 from codetiming import Timer
 from collections import defaultdict
 
@@ -966,10 +965,11 @@ def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None,
             elif fig_kws['hue'] == 'choice_wager':
                 cmap = 'Paired'
 
+            # FIXME not sure what I was trying to do here...
             cmap = mpl.colormaps[cmap]
-            colors = np.asarray(cmap.colors)
-            colors = colors[:len(np.unique(conds[fig_kws['hue']])), :]
-        
+            # colors = np.asarray(cmap.colors)
+            # colors = colors[:len(np.unique(conds[fig_kws['hue']])), :]
+
         cond_cols = []
         if 'row' in fig_kws:
             cond_cols.append(fig_kws['row'])
