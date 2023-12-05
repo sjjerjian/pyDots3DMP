@@ -6,7 +6,7 @@ Created on Thu Apr 13 08:37:40 2023
 @author: stevenjerjian
 """
 # %% ----------------------------------------------------------------
-# imports 
+# imports
 
 import numpy as np
 import pandas as pd
@@ -71,9 +71,9 @@ class Unit:
 
 @dataclass
 class ksUnit(Unit):
-  
+
     # TODO add templates, amps, waveforms etc
-    
+
     rec_set: int = 1
 
     channel: int = 0
@@ -82,7 +82,7 @@ class ksUnit(Unit):
     clus_id: int = 0
     clus_group: int = 0
     clus_label: str = ''
-    
+
     unique_id: int = field(init=False)
 
     def __post_init__(self):
@@ -98,7 +98,7 @@ class Population:
     # recording metadata
     rec_date: date = date.today().strftime("%Y%m%d")
     create_date: date = date.today().strftime("%Y%m%d")
-    
+
     subject: str = ''
     session: str = ''
     rec_set: int = 1
@@ -141,7 +141,7 @@ class RatePop:
     """processed firing rates and events data from one or more recordings"""
 
     subject: str
-    
+
     # single array, one element per unit
     area: np.ndarray[str] = field(repr=False)
     clus_group: np.ndarray = field(repr=False, metadata={1: 'MU', 2: 'SU'})
@@ -151,101 +151,101 @@ class RatePop:
     # each element within firing rates will be units x 'trials'/conditions x time array
     firing_rates: list[np.ndarray] = field(default_factory=list, repr=False)
     timestamps: list[np.ndarray] = field(default_factory=list, repr=False, metadata={'unit':'seconds'})
-    
+
     sep_alignments: bool = field(default=True, repr=False)
     time_reindexed: bool = field(default=False, repr=False)
     rates_averaged: bool = field(default=False, repr=False)
     simul_recorded: bool = field(default=True, repr=False)
-    
+
     psth_params: dict = field(default_factory=dict, repr=False)
 
     # one entry per session
-    conds: tuple = field(default_factory=tuple, repr=False)    
+    conds: tuple = field(default_factory=tuple, repr=False)
     rel_events: dict[str, pd.DataFrame] = field(default_factory=dict, repr=False)
-    
+
     create_date: date = date.today().strftime("%Y%m%d")
 
     def __len__(self):
         return len(self.clus_group)
-    
+
     def __repr__(self):
         return f"Rate Pop (Subj: {self.subject}, Areas: {self.get_unique_areas()}, n={len(self)}"
 
     def get_unique_areas(self):
         return np.unique(self.area).tolist()
-    
-    
+
+
     def split(self):
-        # TODO allow splitting single RatePop into simulatneously recorded 
+        # TODO allow splitting single RatePop into simulatneously recorded
         if unit_session is not None:
             pass
-    
+
     def filter_units(self, inds: np.ndarray):
         """
         Filter units in RatePop, using inds
         use cases: extracting single units, extracting tuned units, units from one area
 
         Args:
-            inds (np.ndarray): array of indices of desired units to keep 
+            inds (np.ndarray): array of indices of desired units to keep
 
         Returns:
             filtered_data (RatePop): A sub-selected version of original RatePop, with just the units in inds
         """
-        
+
         filtered_data = deepcopy(self)
-        
+
         # one entry per unit
         filtered_data.unit_session = self.unit_session[inds]
         filtered_data.area = self.area[inds]
         filtered_data.clus_group = self.clus_group[inds]
         filtered_data.firing_rates = list(map(lambda x: x[inds, ...], self.firing_rates))
-        
+
         # one entry per session
         sessions = np.unique(self.unit_session).tolist()
-        
+
         if isinstance(self.conds, list):
             filtered_data.conds = [self.conds[s] for s in sessions]
-        
+
         if self.rel_events and isinstance(self.rel_events, list):
              filtered_data.rel_events =  [self.rel_events[s] for s in sessions]
 
         return filtered_data
-    
-    
+
+
     def num_trials_per_unit(self, by_conds=False, cond_groups=None) -> tuple[np.ndarray, pd.DataFrame]:
         # return the number of trials for each unique condition in the population
-        
+
         self.concat_alignments()
-        
+
         unit_in_trial = ~np.all(np.isnan(self.firing_rates), axis=2)
         num_units = self.firing_rates.shape[0]
-        
+
         if by_conds:
             ic, nC, cond_groups = condition_index(self.conds, cond_groups)
-            
+
             unit_trial_count = np.zeros((num_units, nC))
-            
+
             for u in range(num_units):
                 unit_trial_count[u, :] = np.bincount(ic[(unit_in_trial[u, :]) & (ic>=0)])
         else:
             unit_trial_count = unit_in_trial.sum(axis=1)
-            
+
         self.split_alignments()
-        
+
         return unit_trial_count, cond_groups
-        
-        
+
+
     def concat_alignments(self, insert_blank: bool = False, warning: bool = False):
-        
+
         if self.sep_alignments:
             if self.psth_params['binsize'] == 0:
                 tvecs = None
                 self.concat_ints = len(self.firing_rates)
             else:
                 tvecs = self.timestamps
-                
+
             concat_result = concat_aligned_rates_single(self.firing_rates, tvecs=tvecs, insert_blank=insert_blank)
-            
+
             self.firing_rates = concat_result[0]
             if self.psth_params['binsize'] > 0:
                 self.timestamps = concat_result[1]
@@ -254,14 +254,14 @@ class RatePop:
         else:
             if warning:
                 print("Firing rates already a single array, skipping...\n")
-            
-        return self       
-                
-                
+
+        return self
+
+
     def split_alignments(self, warning: bool = False):
         if not self.sep_alignments:
             self.firing_rates = np.split(self.firing_rates, self.concat_ints, axis=2)[:-1]
-            
+
             if self.psth_params['binsize'] > 0:
                 self.timestamps = np.split(self.timestamps, self.concat_ints)[:-1]
 
@@ -276,17 +276,17 @@ class RatePop:
         """
         t_int: interval to use as baseline - if None, use all (i.e. assume concatenated, or do the concatenation)
         """
-        
+
         flag_sep = self.sep_alignments
-        
+
         if return_split == 'keep':
             return_split = flag_sep
-        
+
         if t_int is None:
             self.concat_alignments()
         else:
             self.split_alignments()
-            
+
         axis = 2
         if across_conds:
             axis = (2, 1) # average across time, then conditions
@@ -296,45 +296,45 @@ class RatePop:
                 ind0, ind1 = 0, len(self.timestamps)
             else:
                 ind0 = np.argmin(np.abs(self.timestamps - t_range[0]))
-                ind1 = np.argmin(np.abs(self.timestamps - t_range[1])) 
-            
-            
+                ind1 = np.argmin(np.abs(self.timestamps - t_range[1]))
+
+
             # subtract average baseline
             bsln_fr = np.nanmean(self.firing_rates[:, :, ind0:ind1], axis=axis)
-            
+
             if standardize:
                 std_divide = np.nanstd(self.firing_rates[:, :, ind0:ind1], axis=2)
-                
+
                 if across_conds:
                     # now take MEAN stdev across conditions
                     std_divide = np.nanmean(std_divide, axis=1)
-            
+
         else:
             if t_range is None:
                 ind0, ind1 = 0, len(self.timestamps[t_int])
             else:
                 ind0 = np.argmin(np.abs(self.timestamps[t_int] - t_range[0]))
-                ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1])) 
+                ind1 = np.argmin(np.abs(self.timestamps[t_int] - t_range[1]))
 
             # subtract average baseline
             bsln_fr = np.nanmean(self.firing_rates[t_int][:, :, ind0:ind1], axis=axis)
-            
-            if standardize:                
+
+            if standardize:
                 std_divide = np.nanstd(self.firing_rates[t_int][:, :, ind0:ind1], 2)
-                
+
                 if across_conds:
                     # now take MEAN stdev across conditions
                     std_divide = np.nanmean(std_divide, axis=1)
-        
+
             self.concat_alignments()
 
         self.firing_rates -= np.expand_dims(bsln_fr, axis=axis)
         if standardize:
             self.firing_rates /= np.expand_dims(std_divide, axis=axis)
-        
+
         if return_split is True:
             self.split_alignments()
-            
+
         return self
 
 
@@ -342,28 +342,28 @@ class RatePop:
 
         # only separate alignments at end if they were separated to begin with
         flag_sep = self.sep_alignments
-            
+
         self.demean(t_int, t_range, across_conds=across_conds, standardize=False, return_split=False)
-        
+
         axis = 2
         if across_conds:
             axis = (1, 2)
-            
+
         # divide by absolute max across time (and conditions, if across_conds)
         max_fr = np.nanmax(np.abs(self.firing_rates), axis=axis)
         self.firing_rates /= np.expand_dims((max_fr + softmax_const), axis=axis)
-        
+
         if flag_sep:
             self.split_alignments()
-    
-        return self   
-    
-    
+
+        return self
+
+
     def average_rel_event_times(self, by='index'):
-        
+
         if isinstance(self.rel_events, list):
             print('stop here')
-            
+
             final_dict = dict()
             for d in self.rel_events:
                 for key, df in d.items():
@@ -371,32 +371,32 @@ class RatePop:
                         final_dict[key] = df
                     else:
                         final_dict[key] = pd.concat([final_dict[key], df])
-            
+
             # use group-by over index or desired categorical columns
             for key in final_dict.keys():
                 if by=='index':
                     grp_by = final_dict[key].index
-                else:       
+                else:
                     grp_by = final_dict[key][by]
                 final_dict[key] = final_dict[key].groupby(by=grp_by).mean()
 
             self.rel_events = final_dict
-        
+
         else:
-            print('relative event times are already averaged across sessions, or this is just one session')    
-            
-        return self        
-        
-            
+            print('relative event times are already averaged across sessions, or this is just one session')
+
+        return self
+
+
     def reindex_to_event(self, event: str = 'stimOn') -> None:
-         
+
         if not self.time_reindexed:
-            
+
             if self.rel_events and event in self.rel_events:
-                
+
                 # self.timestamps_reindexed = copy(self.timestamps)
                 time_shift = self.rel_events[event].mean(axis=0).to_dict()
-                
+
                 align_events = [al[0] if isinstance(al, list) else al for al in self.psth_params['align_ev']]
 
                 for t, ev in enumerate(align_events):
@@ -406,12 +406,12 @@ class RatePop:
                         print(f"{ev} alignment time base now relative to {event}")
             else:
                 print('Unable to re-index - either rel_events does not exist, or an invalid event was provided\n')
-                
+
             self.time_reindexed = True
         else:
             print('Already re-indexed')
-        
-    
+
+
     def recode_conditions(self, columns: Sequence[str], old_values: Sequence[float],
                           new_values: Union[Sequence[float], float]):
         """Recode conditions in order to pool them together for analysis
@@ -422,8 +422,8 @@ class RatePop:
             new_values (Union[list, int, float]): _description_
         """
         self.conds = recode_conditions(columns, old_values, new_values)
-        
-        
+
+
     def flip_rates(self, unit_inds: np.ndarray[Union[bool, int]], col: Union[str, np.ndarray]) -> None:
         """Flip firing rates for specified units for condition in col (e.g. recoding firing rates for right/left as pref/null)
 
@@ -432,16 +432,16 @@ class RatePop:
             col (Union[str, np.ndarray]): column values for flipping (either a string referring to column in self.conds
             or np.array of hand-coded values. Should have only two unique values)
         """
-        
+
         if isinstance(col, str):
             col = self.conds[col]
-        
+
         val_flip = np.unique(col)
         assert len(val_flip) == 2, "Condition for flipping on should have only 2 unique values"
-        
+
         flag_sep = self.sep_alignments
         self.concat_alignments()
-        
+
         # flip 'em (just the units selected in unit_inds)
 
         these_units = self.firing_rates[unit_inds, :, :]
@@ -452,16 +452,16 @@ class RatePop:
             these_units[:, val1, :], these_units[:, val0, :]
 
         self.firing_rates[unit_inds, :, :] = these_units
-        
+
         if flag_sep:
             self.split_alignments()
-        
-        
-        
+
+
+
 # %% ----------------------------------------------------------------
 # externally defined util functions
-    
-def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: Sequence[float], 
+
+def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: Sequence[float],
                       new_values: Union[Sequence[float], float]):
     """Recode conditions in order to pool them together for analysis
 
@@ -474,11 +474,11 @@ def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: S
     Returns:
         _type_: _description_
     """
-    
+
     assert len(columns) == len(old_values)
     if isinstance(new_values, Sequence):
         assert len(new_values) == len(old_values)
-    
+
     for col in columns:
         for i, orig_val in enumerate(old_values):
             if isinstance(new_values, Sequence):
@@ -489,7 +489,7 @@ def recode_conditions(conds: pd.DataFrame, columns: Sequence[str], old_values: S
     return conds
 
 
-def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence, 
+def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence,
                     cond_groups: Optional[pd.DataFrame]) -> dict:
 
     good_trs = events['goodtrial'].to_numpy(dtype='bool')
@@ -504,20 +504,20 @@ def rel_event_times(events: pd.DataFrame, align: Sequence, others: Sequence,
         align_ev = events.loc[good_trs, aev].to_numpy(dtype='float64', na_value=np.nan)
         other_ev = events.loc[good_trs, oev].to_numpy(dtype='float64', na_value=np.nan)
         reltimes[aev] = other_ev - align_ev[:, np.newaxis]
-        
+
         if cond_groups is not None:
             condlist = events.loc[good_trs, cond_groups.columns]
             ic, nC, cond_groups = condition_index(condlist, cond_groups)
-            
+
             temp = np.full((nC, reltimes[aev].shape[1]), np.nan)
             for c in range(nC):
                 if np.sum(ic == c):
                     temp[c, :] = np.nanmedian(reltimes[aev][ic == c], axis=0)
-            
+
             reltimes[aev] = temp
 
         reltimes[aev] = pd.DataFrame(reltimes[aev], columns=oev)
-        
+
     return reltimes
 
 
@@ -564,10 +564,10 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
     """
 
     nTr = align.shape[0]
-    
+
     if nTr == 0:
         return None
-    
+
     if align.ndim == 2:
         align = np.sort(align, axis=1)
         ev_order = np.argsort(align, axis=1)
@@ -601,7 +601,7 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
         tend_rel = np.max(tends_rel)
         tstart_rel = trange[0]
         tstarts_rel = tstart_rel.repeat(tends_rel.shape[0])
-    
+
     # reset the absolute tr_starts and tr_ends from here
     tr_starts = align[:, 0] + tstart_rel
     tr_ends = align[:, 1] + tend_rel
@@ -617,10 +617,10 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
         if trange[0] < 0 and trange[1] > 0:
             # set forwards and backwards bins separately first, to ensure that time 0 is one of the bin edges
             x0 = np.arange(0, tstart_rel-binsize, -binsize)
-                x1 = np.arange(0, tend_rel+binsize+1e-3, binsize)
-                x = np.hstack((x0[::-1, ], x1[1:, ]))
-            else:
-                x = np.arange(tstart_rel, tend_rel+binsize, binsize)
+            x1 = np.arange(0, tend_rel+binsize+1e-3, binsize)
+            x = np.hstack((x0[::-1, ], x1[1:, ]))
+        else:
+            x = np.arange(tstart_rel, tend_rel+binsize, binsize)
 
         fr_out = np.full([nTr, x.shape[0]-1], np.nan)
 
@@ -655,13 +655,13 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                 # save the individual times (relative to alignment event) for raster plots
                 spktimes_aligned.append(inds_t)
 
-            # set nans outside the range of align/trange for each trial
-            if which_ev == 0:
-                end_pos = np.argmin(abs(x - tends_rel[itr]))
-                fr_out[itr, end_pos:] = np.nan
-            elif which_ev == 1:
-                start_pos = np.argmin(abs(x - tstarts_rel[itr]))
-                fr_out[itr, :start_pos] = np.nan
+                # set nans outside the range of align/trange for each trial
+                if which_ev == 0:
+                    end_pos = np.argmin(abs(x - tends_rel[itr]))
+                    fr_out[itr, end_pos:] = np.nan
+                elif which_ev == 1:
+                    start_pos = np.argmin(abs(x - tstarts_rel[itr]))
+                    fr_out[itr, :start_pos] = np.nan
 
         for itr in range(itr_end+1, nTr):
             spktimes_aligned.append(np.empty(1))
@@ -679,13 +679,13 @@ def trial_psth(spiketimes: np.ndarray, align: np.ndarray,
                 # alternative?
                 st = sm_nbins // 2
                 en = len(x) - 1 - (st+1)
-                
+
                 # st = np.argmin(np.abs(x - tstart_orig))
                 # en = np.argmin(np.abs(x - tend_orig))
-                
+
                 # x = x[st:en]
                 # fr_out = fr_out[:, st:en]
-                
+
             if normalize:
                 fr_out /= binsize
 
@@ -721,15 +721,15 @@ def smooth_fr(raw_fr, params: Optional[dict] = None, kernel: Optional[np.ndarray
                 win /= np.sum(win)
 
         elif params['type'] == 'causal':
-        
-        raise NotImplementedError('Not implemented yet')
-    
-        # width = params['width']
-        # if isinstance(width, float):
-        #     width = [0.001, width]
-            
-        # rise_time, decay_time = width
-        # win = np.arange(0, rise_time + decay_time, params['binsize'])
+
+            raise NotImplementedError('Not implemented yet')
+
+            # width = params['width']
+            # if isinstance(width, float):
+            #     width = [0.001, width]
+
+            # rise_time, decay_time = width
+            # win = np.arange(0, rise_time + decay_time, params['binsize'])
             # win = (1 - np.exp(win / rise_time)) * np.exp(win / decay_time)
             # win /= np.sum(win)  # re-normalize here
 
@@ -798,7 +798,7 @@ def calc_firing_rates(units, events, align_ev='stimOn', trange=np.array([[-2, 3]
 
     else:
         return rates, unitlabels, condlist, tvecs, align_lst
-    
+
 
 # %% PLOTTING UTILITY FUNCTIONS
 
@@ -902,7 +902,7 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
                 cond_fr[ic == hc, :].std(axis=0) / np.sum(ic == hc)
 
             ax.plot(x, cond_mean_fr[hc, :], color=cond_colors[hc, :])
-            
+
         ax.set_xlim(trange[0], trange[1])
         if c == 0:
             ax.set_ylabel('spikes/sec')
@@ -921,19 +921,19 @@ def plot_raster(spiketimes: np.ndarray, align: np.ndarray, condlist: pd.DataFram
 # general time series plotting functions
 
 
-def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None, 
-                    conds: Optional[pd.DataFrame] = None, 
+def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None,
+                    conds: Optional[pd.DataFrame] = None,
                     xlabel: Optional[str] = '', ylabel: Optional[str] = '',
                     hue_labels: Optional[Sequence] = None,
                     **fig_kws):
     """Plot a timeseries, grouped by conditions (according to fig_kws)
     Specify row, col and hue
-    
+
     # TODO add style option
 
     Args:
         X (np.ndarray): array containing time series. conditions/trials x timesteps, or units x conditions/trials x timesteps
-        If ndim==3, will average over units (axis=0) first. NOTE that this doesn't do any averaging over trials - 
+        If ndim==3, will average over units (axis=0) first. NOTE that this doesn't do any averaging over trials -
         if X contains condition-averaged data already, those traces will be plotted. If X contains individual trials, individual trials averaged across units will be shown.
         timestamps (Optional[np.ndarray], optional): time indices - will determine xticks. Defaults to None.
         conds (Optional[pd.DataFrame], optional): dataframe containing conditions. Defaults to None.
@@ -943,19 +943,19 @@ def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None,
     Returns:
         _type_: figure handle
     """
-    
-    
+
+
     if timestamps is None:
         timestamps = np.arange(X.shape[-1])
-        
+
     if X.ndim == 3:
-        X = np.squeeze(np.nanmean(X, axis=0)) # average over units, within each unique trial/condition     
-    
+        X = np.squeeze(np.nanmean(X, axis=0)) # average over units, within each unique trial/condition
+
     if conds is not None:
-        
+
         # set hue colormap
         if 'hue' in fig_kws:
-            
+
             if fig_kws['hue'] == 'heading':
                 hue_norm = (-12, 12)
                 if isinstance(hue_norm, tuple):
@@ -974,10 +974,10 @@ def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None,
             cond_cols.append(fig_kws['row'])
         if 'col' in fig_kws:
             cond_cols.append(fig_kws['col'])
-            
+
         fig = sns.FacetGrid(data=conds, **fig_kws)
         for ax_key, ax in fig.axes_dict.items():
-            
+
             cond_trials = (conds[cond_cols]==ax_key).all(axis=1).values
             ax_data = X[cond_trials, :]
 
@@ -985,40 +985,42 @@ def plot_timeseries(X: np.ndarray, timestamps: Optional[np.ndarray] = None,
                 hue_trials = conds.loc[cond_trials, fig_kws['hue']].values
                 if fig_kws['hue']=='heading':
                     colors = cmap(hue_norm(hue_trials).data.astype('float'))
-            
+                else:
+                    pass  # TODO deal with non-heading
+
                 lbl = None
-                for hue in np.unique(hue_trials): 
-                            
+                for hue in np.unique(hue_trials):
+
                     x_cond_hue = ax_data[hue_trials == hue, :].T
-                    x_color = colors[hue_trials == hue, :]
-                    
+                    x_color = colors[hue_trials == hue, :3]
+
                     if hue_labels:
                         lbl = hue_labels[hue]
                     ax.plot(timestamps, x_cond_hue, c=x_color, label=lbl)
-            
+
             else:
                 raise NotImplementedError("Not implemented without hue parameter")
                 # TODO: allow hue to be ignored
-                
+
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
-            
+
             ax.legend()
-            
+
     else:
 
         fig = plt.figure()
-        
-           
+
+
         plt.plot(timestamps, X.T)
 
-    return fig  
+    return fig
 
 
 
 # WIP
 def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_events, plot_single_trials: bool = False, **fig_kws):
-            
+
     cond_cols = []
     if 'row' in fig_kws:
         cond_cols.append(fig_kws['row'])
@@ -1026,7 +1028,7 @@ def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_even
         nrows = len(urow)
     else:
         nrows = 1
-        
+
     if 'col' in fig_kws:
         cond_cols.append(fig_kws['col'])
         ucol = np.unique(cond_df[fig_kws['col']])
@@ -1036,13 +1038,13 @@ def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_even
 
     if len(cond_cols) == 0:
         raise ValueError('must specify row and/or col')
-    
+
     ncols_final = ncols * len(timestamps)
     width_ratios = ncols * list(map(len, timestamps))
-    
+
     # set hue colormap
     if 'hue' in fig_kws:
-        
+
         if fig_kws['hue'] == 'heading':
             hue_norm = (-12, 12)
             if isinstance(hue_norm, tuple):
@@ -1053,19 +1055,19 @@ def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_even
 
         cmap = mpl.colormaps[cmap]
         colors = cmap
-    
+
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols_final, gridspec_kw=dict(width_ratios=width_ratios), sharey=True)
 
     for col in range(ncols_final):
         col_i = col%len(fr_list)
         f_rates = fr_list[col_i]
-        
+
         if col_i > 0:
             sns.despine(left=True)
-            
+
         for row in range(nrows):
             sns.despine(right=True, top=True)
-            
+
             print(row, col, col_i)
             if 'row' in fig_kws and 'col' in fig_kws:
                 cond_trials = (cond_df[cond_cols]==(urow[row], ucol[col//len(fr_list)])).all(axis=1).values
@@ -1075,32 +1077,32 @@ def plot_rate(fr_list: list, timestamps: list, cond_df: pd.DataFrame, align_even
                 cond_trials = (cond_df[cond_cols]==ucol[col_i]).values
 
             hue_trials = cond_df.loc[cond_trials,fig_kws['hue']].values
-            
+
             if fig_kws['hue']=='heading':
                 colors = cmap(hue_norm(hue_trials).data.astype('float'))
-            
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
-                
+
                 ax_data = np.squeeze(np.nanmean(f_rates[:, cond_trials, :], axis=0)) # average over units
-                
-                for hue in np.unique(hue_trials): 
-                        
+
+                for hue in np.unique(hue_trials):
+
                     y_data = ax_data[hue_trials == hue, :].T
                     color = colors[hue_trials == hue, :]
-                    
+
                     if not plot_single_trials:
                         y_data = np.nanmean(y_data, axis=1)
                         color = np.nanmean(color, axis=0)
 
                     axs[row, col].plot(timestamps[col_i], y_data, color=color)
-            
-            axs[row, col].set_xlim([timestamps[col_i][0], timestamps[col_i][-1]])    
-            
+
+            axs[row, col].set_xlim([timestamps[col_i][0], timestamps[col_i][-1]])
+
             xtix = axs[row, col].get_xticks()
             xtix_new = np.where(xtix==0, align_events[col_i], xtix)
             axs[row, col].set_xticks(xtix, xtix_new)
-    
+
     plt.show()
                       
     return fig, axs
