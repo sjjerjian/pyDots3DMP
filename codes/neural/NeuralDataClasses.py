@@ -401,9 +401,9 @@ class RatePop:
 
                 for t, ev in enumerate(align_events):
                     if ev in time_shift:
-                        self.timestamps += time_shift[ev]
-                        # self.timestamps_reindexed[t] = self.timestamps[t] + time_shift[ev]            
-                        print(f"{ev} alignment time base now relative to {event}")    
+                        self.timestamps[t] += time_shift[ev]
+                        # self.timestamps_reindexed[t] = self.timestamps[t] + time_shift[ev]
+                        print(f"{ev} alignment time base now relative to {event}")
             else:
                 print('Unable to re-index - either rel_events does not exist, or an invalid event was provided\n')
                 
