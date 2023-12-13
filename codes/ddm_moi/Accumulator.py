@@ -1,19 +1,24 @@
 import numpy as np
+from scipy.stats import multivariate_normal as mvn
+from statsmodels.sandbox.distributions.extras import mvnormcdf as mvnormcdf
+
 import matplotlib.pyplot as plt
 from matplotlib import animation
-from scipy.stats import multivariate_normal as mvn
+
 from dataclasses import dataclass, field
-from numba import jit
 from functools import lru_cache, wraps
+from typing import Optional
+from codetiming import Timer
+
+import time
 
 import threading
-from codetiming import Timer
-from joblib import Memory
-
-# memory = Memory(location='.', verbose=0)
 
 
-# https://stackoverflow.com/questions/52331944/cache-decorator-for-numpy-arrays
+def chol_sample(mean, cov):
+    return mean + np.linalg.cholesky(cov) @ np.random.standard_normal(mean.size)
+
+# https://stackoverflow.com/questions/52331944/cache-decorator-for-numpy-arrays
 def np_cache(function):
     @lru_cache
     def cached_wrapper(*args, **kwargs):
@@ -40,6 +45,7 @@ def np_cache(function):
     wrapper.cache_clear = cached_wrapper.cache_clear
 
     return wrapper
+
 
 def np_cache_minimal(function):
     @lru_cache
@@ -80,13 +86,20 @@ class AccumulatorModelMOI:
 
     """
 
+    bound: np.ndarray = np.array([1, 1])
     tvec: np.ndarray = field(default=np.arange(0, 2, 0.005))
+
+    # don't initialize, they will get set by the setter methods!
+    _bound: np.ndarray = field(init=False, repr=False)
+    _tvec: np.ndarray = field(init=False, repr=False)
+
+    dt: float = field(init=False, repr=False)
+
     grid_spacing: float = field(default=0.025)
     drift_rates: list = field(default_factory=list)
     drift_labels: list = field(default_factory=list)
     sensitivity: float = field(default=1)
     urgency: np.ndarray = field(default=None)
-    bound: np.ndarray = np.array([1, 1])  
     num_images: int = 7
 
     # TODO clean this up a bit, if we can?
@@ -97,55 +110,53 @@ class AccumulatorModelMOI:
     up_lose_pdf: np.ndarray = np.array([])
     lo_lose_pdf: np.ndarray = np.array([])
     log_odds: np.ndarray = np.array([])
-    
-    dt: float = field(init=False)
 
-    def _scale_drift(self):
+
+
+    @property
+    def bound(self):
+        return self._bound
+
+    @bound.setter
+    def bound(self, b):
+        if isinstance(b, (int, float)):
+            b = [b, b]
+        self._bound = np.array(b)
+
+    @property
+    def tvec(self):
+        return self._tvec
+
+    @tvec.setter
+    def tvec(self, time_vec: np.ndarray):
+        self._tvec = time_vec
+        self.dt = np.gradient(time_vec)
+
+
+    def set_drifts(self, drifts: Optional[list] = None, labels: Optional[list] = None):
+
+        if drifts is not None:
+            self.drift_rates = drifts
+
         # add corresponding negated value for anti-correlated accumulator
         # also update drift rates based on sensitivity and urgency, if provided
         for d, drift in enumerate(self.drift_rates):
             drift = drift * np.array([1, -1])
             self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
 
-        return self
-    
-    # TODO make PEP8 getter and setter methods
-    def set_bound(self, bound):
-        if isinstance(bound, (int, float)):
-            bound = np.array([bound, bound])
-        elif isinstance(bound, list):
-            bound = np.array(bound)
-        
-        # assert len(bound) == 2, 'bound must be a single int/float, or a 2-element array'
-        self.bound = bound
-        
-        return self
-    
-    
-    def set_time(self, tvec):
-        self.tvec = tvec
-        self.dt = np.gradient(self.tvec)
-     
-        return self
-
-    def __post_init__(self):
-
-        self.dt = np.gradient(self.tvec)
-        self.set_bound(self.bound) # in case bound is given as single int/float
-
-        if len(self.drift_labels) == 0:
-             self.drift_labels = np.arange(len(self.drift_rates))
-        self._scale_drift()
-
-
-    def set_drifts(self, drifts: list, labels=None):
-        self.drift_rates = drifts
-        self._scale_drift()
 
         if labels is not None:
             self.drift_labels = labels
 
         return self
+
+
+    def __post_init__(self):
+
+        # default set the drift labels as 0:ndrifts
+        if len(self.drift_labels) == 0:
+             self.drift_labels = np.arange(len(self.drift_rates))
+        self.set_drifts(labels=self.drift_labels)
 
 
     def _pdf(self, full_pdf=False):
@@ -155,38 +166,36 @@ class AccumulatorModelMOI:
             xmesh, ymesh = np.meshgrid(self.grid_vec, self.grid_vec)
         else:
             xmesh1, ymesh1 = np.meshgrid(self.grid_vec, self.grid_vec[-1])
-            ymesh2, xmesh2 = np.meshgrid(self.grid_vec, self.grid_vec[-1])
+            xmesh2, ymesh2 = np.meshgrid(self.grid_vec[-1], self.grid_vec)
 
         pdfs, marg_up, marg_lo = [], [], []
 
         for drift in self.drift_rates:
 
             if full_pdf:
-                # TODO make this a class method
                 pdf_3d = moi_pdf(xmesh, ymesh, self.tvec, drift, self.bound, self.num_images)
                 pdfs.append(pdf_3d)
-                
-                pdf_up = pdf_3d[:, :, -1] # right bound
+
+                pdf_up = pdf_3d[:, :, -1]  # right bound
                 pdf_lo = pdf_3d[:, -1, :]  # top bound
-                
+
             else:
-            
-                # start = time.time()
+                # only need to calculate pdf at the boundaries!
                 pdf_lo = moi_pdf(xmesh1, ymesh1, self.tvec, drift, self.bound, self.num_images)
                 pdf_up = moi_pdf(xmesh2, ymesh2, self.tvec, drift, self.bound, self.num_images)
-            
+
             # distribution of losing accumulator, GIVEN that winner has hit bound
             marg_up.append(pdf_up)  # right bound
             marg_lo.append(pdf_lo)  # top bound
-            
+
         if full_pdf:
             self.pdf3D = np.stack(pdfs, axis=0)
-        
+
         self.up_lose_pdf = np.stack(marg_up, axis=0)
         self.lo_lose_pdf = np.stack(marg_lo, axis=0)
 
         return self
-    
+
 
     def log_posterior_odds(self):
         self.log_odds = log_odds(self.up_lose_pdf, self.lo_lose_pdf)
@@ -206,8 +215,8 @@ class AccumulatorModelMOI:
         return self
 
 
-    def dv(self, drift, sigma):
-        return moi_dv(mu=drift, s=sigma, num_images=self.num_images)
+    def dv(self, drift, sigma, cusum=False):
+        return moi_dv(mu=drift*self.tvec.reshape(-1, 1), s=sigma, num_images=self.num_images)
 
 
     def dist(self, return_pdf=False):
@@ -220,9 +229,9 @@ class AccumulatorModelMOI:
 
 
     def plot(self, d_ind=-1):
-        
+
         # d_ind - index of which drift to plot for PDFs
-        
+
         fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
         axc[0].plot(self.drift_labels, self.p_corr)
         axc[0].set_xlabel('drift')
@@ -234,10 +243,10 @@ class AccumulatorModelMOI:
         axc[1].set_xlabel('Time (s)')
         axc[1].set_title('RT distribution (no NDT)')
         fig_cdf.tight_layout()
-        
+
         fig_pdf = None
         if self.up_lose_pdf:
-            fig_pdf, axp = plt.subplots(2+include_logodds, 1, figsize=(5, 6))
+            fig_pdf, axp = plt.subplots(2+self.log_odds, 1, figsize=(5, 6))
             contour = axp[0].contourf(self.tvec, self.grid_vec,
                                       log_pmap(np.squeeze(self.up_lose_pdf[d_ind, :, :])).T,
                                       levels=100)
@@ -259,44 +268,44 @@ class AccumulatorModelMOI:
             fig_pdf.tight_layout()
 
         return fig_cdf, fig_pdf
-    
-    
+
+
     def plot_3d(self, d_ind=-1):
-        
+
         # fig, ax = plt.subplots()
         # cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, 0, :, :])
         # ax.set_title(f't = {self.tvec[i]:.2f}')
         # fig.canvas.draw()
-        
+
         # for i in range(1, len(self.tvec)):
         #     cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, i, :, :])
         #     ax.set_title(f't = {self.tvec[i]:.2f}')
         #     fig.canvas.draw()
-            
+
         # plt.show()
-        
-        
+
+
         def animate_wrap(i):
             z = self.pdf3D[d_ind, i, :, :]
             cont = plt.contourf(self.grid_vec, self.grid_vec, z)
             return cont
-        
+
         def init():
             cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, 0, :, :])
             return cont
-        
+
         anim_event = threading.Event()
 
         fig, ax = plt.subplots()
         anim = animation.FuncAnimation(fig, animate_wrap, frames=len(self.tvec),
                                        init_func=init, interval=50, repeat=False)
-        
+
         anim_event.wait()
-        
+
         # TODO video/gif style plot of third quadrant pdf at each timestep
-        
-        
-        
+
+
+
 
 # ============
 # functions
@@ -365,7 +374,6 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
     pdf_result = np.zeros((len(tvec), nx, ny)).squeeze()
 
     xy_mesh = np.dstack((xmesh, ymesh))
-    print(xy_mesh.shape)
 
     s0 = -bound
     # skip the first sample (t starts at 1)
@@ -383,25 +391,26 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
 
 
 @np_cache
-def mvn_timestep(mean: np.ndarray, cov: np.ndarray):
+def _mvn_timestep(mean: np.ndarray, cov: np.ndarray):
     return mvn(mean=mean, cov=cov)
 
 
-@np_cache
+#@np_cache
 def pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
 
     # pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
-    pdf = mvn_timestep(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
+    pdf = _mvn_timestep(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
+
     for j in range(1, k * 2):
         sj = _sj_rot(j, s0, k)
         a_j = _weightj(j, mu.T, sigma, sj, s0)
         # pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
-        pdf += a_j * mvn_timestep(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
-
+        pdf += a_j * _mvn_timestep(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
 
     return pdf
 
-# @Timer(name='moi_cdf')
+
+#@Timer(name='moi_cdf')
 def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
     """
     For a given 2-D particle accumulator with drift mu over time tvec, calculate
@@ -418,7 +427,7 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     TODO see how much changing the difference between bound and bound_marginal affects anything
 
     """
-    
+
     sigma, k = _corr_num_images(num_images)
 
     survival_prob = np.ones(len(tvec))
@@ -432,19 +441,22 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
 
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
-        
+
+        # why do we need this?
         if tvec[t] == 0:
             # tvec[t] = np.finfo(np.float64).eps
-            tvec[t] = np.min(tvec[tvec>0])
+            tvec[t] = np.min(tvec[tvec > 0])
 
         mu_t = mu[t, :].T * tvec[t]
 
-        mvn_0 = mvn_timestep(mean=s0 + mu_t, cov=sigma * tvec[t])
-
         # total density within boundaries
+
+        mvn_0 = _mvn_timestep(mean=s0 + mu_t, cov=sigma * tvec[t])
+        mvn_0.maxpts = 10000*2
+
         cdf_rest = mvn_0.cdf(bound0)
 
-        # density beyond boundary in one or other direction
+        # density beyond boundary, in one or other direction
         cdf1 = mvn_0.cdf(bound1) - cdf_rest
         cdf2 = mvn_0.cdf(bound2) - cdf_rest
 
@@ -452,7 +464,9 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
         for j in range(1, k*2):
             sj = _sj_rot(j, s0, k)
 
-            mvn_j = mvn_timestep(mean=sj + mu_t, cov=sigma * tvec[t])
+            mvn_j = _mvn_timestep(mean=sj + mu_t, cov=sigma * tvec[t])
+            mvn_j.maxpts = 10000*2
+
 
             # total density WITHIN boundaries for jth image
             cdf_add = mvn_j.cdf(bound0)
@@ -472,16 +486,17 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
 
     p_up = np.sum(flux2) / np.sum(flux1 + flux2)
 
-    # if we want the correct vs error RT distributions, then presumably can treat flux1 and flux2 as 1-survival_probs
+    # if we want the correct vs error RT distributions,
+    # then presumably can treat flux1 and flux2 as 1-survival_probs
     rt_dist = np.diff(np.insert(1-survival_prob, 0, 0))
 
     # winning and losing pdfs? kinda
-    pdf_up = np.diff(flux2)
-    pdf_lo = np.diff(flux1)
+    # pdf_up = np.diff(flux2)
+    # pdf_lo = np.diff(flux1)
 
     return p_up, rt_dist, flux1, flux2
 
-@np_cache
+
 def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7) -> np.ndarray:
 
     sigma, k = _corr_num_images(num_images)
@@ -489,9 +504,11 @@ def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7
     V = np.diag(s) * sigma * np.diag(s)
 
     dv = np.zeros_like(mu)
+
+    # FIXME for some reason this seems to produce the same sequences each run
+    # would be good to control this more explicitly with seed setting
     for t in range(1, mu.shape[0]):
-        mvn_dv = mvn(mu[t, :].T, cov=V)  # frozen mv object
-        dv[t, :] = mvn_dv.rvs()
+        dv[t, :] = mvn(mu[t, :].T, cov=V).rvs()
 
     dv = dv.cumsum(axis=0)
 
@@ -501,16 +518,16 @@ def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7
 def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
 
     if len(mu) != len(tvec):
-            mu = np.tile(mu, (len(tvec), 1))
+        mu = np.tile(mu, (len(tvec), 1))
 
     if urg is not None:
         if isinstance(urg, (int, float)):
             urg = np.ones(len(tvec)-1) * urg/(len(tvec)-1)
             urg = np.insert(urg, 0, 0)
-    
+
         assert len(urg) == len(tvec) == len(mu),\
             "If urgency signal is a vector, it must match tvec and drift vector lengths"
-        
+
         mu = mu + urg.reshape(-1, 1)
 
     return mu
@@ -518,19 +535,20 @@ def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
 
 def log_odds(pdf1: np.ndarray, pdf2: np.ndarray) -> np.ndarray:
     """
-    calculate log posterior odds of correct choice
+    Calculate log posterior odds of correct choice.
+
     assumes that drift is the first dimension, which gets marginalized over
     :param pdf1: pdf of losing race for correct trials
     :param pdf2: pdf of losing race for incorrect trials
     :return log_odds_correct: heatmap, log posterior odds of correct choice
     """
-
     # replaces zeros with tiny value to avoid logarithm issues
-    pdf1[pdf1 == 0] = np.finfo(np.float64).tiny
-    pdf2[pdf2 == 0] = np.finfo(np.float64).tiny
+    min_val = np.finfo(np.float64).tiny
+    pdf1 = np.clip(pdf1, a_min=min_val, a_max=None)
+    pdf2 = np.clip(pdf2, a_min=min_val, a_max=None)
 
     odds = np.sum(pdf1, axis=0) / np.sum(pdf2, axis=0)
-    odds[odds < 1] = 1
+    odds = np.clip(odds, a_min=1, a_max=None)
     return np.log(odds)
 
 
@@ -541,7 +559,8 @@ def log_pmap(pdf: np.ndarray, q: int = 30) -> np.ndarray:
     :param q:
     :return:
     """
-    pdf[pdf < 10**(-q)] = 10**(-q)
+
+    pdf = np.clip(pdf, a_min=10**(-q), a_max=None)
     return (np.log10(pdf)+q) / q
 
 
