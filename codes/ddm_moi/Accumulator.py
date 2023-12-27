@@ -173,7 +173,8 @@ class AccumulatorModelMOI:
         for drift in self.drift_rates:
 
             if full_pdf:
-                pdf_3d = moi_pdf(xmesh, ymesh, self.tvec, drift, self.bound, self.num_images)
+                pdf_3d = _moi_pdf(xmesh, ymesh, self.tvec, drift,
+                                  self.bound, self.num_images)
                 pdfs.append(pdf_3d)
 
                 pdf_up = pdf_3d[:, :, -1]  # right bound
@@ -181,10 +182,14 @@ class AccumulatorModelMOI:
 
             else:
                 # only need to calculate pdf at the boundaries!
-                pdf_lo = moi_pdf(xmesh1, ymesh1, self.tvec, drift, self.bound, self.num_images)
-                pdf_up = moi_pdf(xmesh2, ymesh2, self.tvec, drift, self.bound, self.num_images)
 
-            # distribution of losing accumulator, GIVEN that winner has hit bound
+                # vectorized implementation is about 10x faster!
+                pdf_lo = _moi_pdf_vec(xmesh1, ymesh1, self.tvec, drift,
+                                      self.bound, self.num_images)
+                pdf_up = _moi_pdf_vec(xmesh2, ymesh2, self.tvec, drift,
+                                      self.bound, self.num_images)
+
+            # distribution of losing accumulator, GIVEN winner has hit bound
             marg_up.append(pdf_up)  # right bound
             marg_lo.append(pdf_lo)  # top bound
 
@@ -356,9 +361,63 @@ def _corr_num_images(num_images):
     return sigma, k
 
 
-def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
-            mu: np.ndarray, bound=np.array([1, 1]), num_images: int=7):
+def _moi_pdf_vec(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
+                 mu: np.ndarray, bound=np.array([1, 1]), num_images: int = 7):
     """
+    Calculate 2-D pdf according to method of images, vectorized implementation.
+
+    :param xmesh: x-values for pdf computation
+    :param ymesh: y-valuues, should match shape of xmesh
+    :param tvec: 1-D array containing times to evaluate pdf
+    :param mu: drift rate 2xlen(tvec) array (to incorporate any urgency signal)
+    :param bound: bound, length 2 array
+    :param num_images: number of images
+    :return: 2-D probability density function evaluated at points in xmesh-ymesh
+    """
+    sigma, k = _corr_num_images(num_images)
+
+    nx, ny = xmesh.shape
+    pdf_result = np.zeros((len(tvec), nx, ny)).squeeze()
+    # pdf_result2 = np.zeros_like(pdf_result)
+
+    xy_mesh = np.dstack((xmesh, ymesh))
+    new_mesh = xy_mesh.reshape(-1, 2)
+
+    # xy_mesh is going to be an X*Y*2 mesh.
+    # for vectorized pdf calculation, reshape it to N*2
+    # TODO this might require more testing for the full_pdf
+
+    s0 = -bound
+
+    covs = tvec[:, None, None] * sigma
+
+    mu_t = tvec[:, None] * mu
+
+    pdf_result += np.exp(_multiple_logpdfs_vec_input(new_mesh, s0 + mu_t, covs))
+
+    for j in range(1, k*2):
+        sj = _sj_rot(j, s0, k)
+
+        aj_all = np.zeros_like(tvec).reshape(-1, 1)
+
+        # skip the first sample (t starts at 1)
+        for t in range(1, len(tvec)):
+            a_j = _weightj(j, mu[t, :].T, sigma, sj, s0)
+            aj_all[t] = a_j
+
+            # pdf_result[t, ...] += a_j * mvn(mean=sj + mu[t, :], cov=sigma*tvec[t]).pdf(xy_mesh)
+
+        # use vectorized implementation!
+        # TODO unit tests with np.allclose vs scipy mvn result
+        pdf_result += (aj_all * np.exp(_multiple_logpdfs_vec_input(new_mesh, sj + mu_t, covs)))
+
+    return pdf_result
+
+
+def _moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
+            mu: np.ndarray, bound=np.array([1, 1]), num_images: int = 7):
+    """
+    Calculate 2-D pdf according to method of images.
 
     :param xmesh:
     :param ymesh:
@@ -376,44 +435,37 @@ def moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
     xy_mesh = np.dstack((xmesh, ymesh))
 
     s0 = -bound
+
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
 
-        pdf_result[t, ...] = pdf_at_timestep(tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
-
-        # pdf_result[t, ...] = mvn(mean=s0 + mu_t, cov=sigma_t).pdf(xy_mesh)
-        # for j in range(1, k*2):
-        #     sj = sj_rot(j, s0, k)
-        #     a_j = weightj(j, mu[t, :].T, sigma, sj, s0)
-        #     pdf_result[t, ...] += a_j * mvn(mean=sj + mu_t, cov=sigma_t).pdf(xy_mesh)
+        pdf_result[t, ...] = _pdf_at_timestep(
+            tvec[t], mu[t, :], sigma, xy_mesh, k, s0)
 
     return pdf_result
 
 
-@np_cache
-def _mvn_timestep(mean: np.ndarray, cov: np.ndarray):
-    return mvn(mean=mean, cov=cov)
+def _pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
 
+    pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
+    # pdf = _mvn_timestep(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
 
-#@np_cache
-def pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
-
-    # pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
-    pdf = _mvn_timestep(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
-
-    for j in range(1, k * 2):
+    # j-values start at 1, go to k*2-1
+    for j in range(1, k*2):
         sj = _sj_rot(j, s0, k)
         a_j = _weightj(j, mu.T, sigma, sj, s0)
-        # pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
-        pdf += a_j * _mvn_timestep(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
+        pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
+        # pdf += a_j * _mvn_timestep(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
 
     return pdf
 
 
-#@Timer(name='moi_cdf')
-def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
+# @Timer(name='moi_cdf')
+def _moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
     """
-    For a given 2-D particle accumulator with drift mu over time tvec, calculate
+    Calculate the cdf of a 2-D particule accumulator.
+
+    The function will then return
         a) the probability of a correct choice
         b) the distribution of response times (bound crossings)
     choices are calculated by evaluating cdf at each boundary separately,
@@ -424,14 +476,13 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     :param num_images: number of images for method of images, default 7
     :return: probability of correct choice (p_up), and decision time distribution (rt_dist)
 
-    TODO see how much changing the difference between bound and bound_marginal affects anything
+    TODO does the difference between bound and bound_marginal affect anything
 
     """
-
     sigma, k = _corr_num_images(num_images)
 
-    survival_prob = np.ones(len(tvec))
-    flux1, flux2 = np.zeros(len(tvec)), np.zeros(len(tvec))
+    survival_prob = np.ones_like(tvec)
+    flux1, flux2 = np.zeros_like(tvec), np.zeros_like(tvec)
 
     s0 = -bound
     b0, bm = -margin_width, 0
@@ -439,41 +490,69 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     bound1 = np.array([b0, bm])  # top boundary of third quadrant
     bound2 = np.array([bm, b0])  # right boundary
 
+    # for under the hood call to mvnun
+    low = np.asarray([-np.inf, -np.inf])
+    opts = dict(maxpts=None, abseps=1e-5, releps=1e-5)
+
+    # calling the lower-level Fortran for generating the mv normal distribution is MUCH faster
+    # lots of overhead associated with repeated calls of mvn.cdf...
+    # downside is that this is a private function, so have to be more careful
+    # skipping checks e.g. on positive definite-ness of cov matrix, and could also change in
+    # future Scipy releases without warning.
+    use_mvnun = True
+
     # skip the first sample (t starts at 1)
     for t in range(1, len(tvec)):
 
-        # why do we need this?
+        # why do we need this?, because otherwise cov becomes zero?
         if tvec[t] == 0:
             # tvec[t] = np.finfo(np.float64).eps
             tvec[t] = np.min(tvec[tvec > 0])
 
         mu_t = mu[t, :].T * tvec[t]
 
-        # total density within boundaries
+        # define frozen mv object
+        if not use_mvnun:
+            mvn_0 = _mvn_timestep(mean=s0 + mu_t, cov=sigma * tvec[t])
+            mvn_0.maxpts = 10000*2
 
-        mvn_0 = _mvn_timestep(mean=s0 + mu_t, cov=sigma * tvec[t])
-        mvn_0.maxpts = 10000*2
+            # total density within boundaries
+            cdf_rest = mvn_0.cdf(bound0)
 
-        cdf_rest = mvn_0.cdf(bound0)
+            # density beyond boundary, in one or other direction
+            cdf1 = mvn_0.cdf(bound1) - cdf_rest
+            cdf2 = mvn_0.cdf(bound2) - cdf_rest
 
-        # density beyond boundary, in one or other direction
-        cdf1 = mvn_0.cdf(bound1) - cdf_rest
-        cdf2 = mvn_0.cdf(bound2) - cdf_rest
+        else:
+            # total density within boundaries
+            cdf_rest = _mvn.mvnun(low, bound0, s0 + mu_t, sigma * tvec[t], **opts)[0]
+
+            # density beyond boundary, in one or other direction
+            cdf1 = _mvn.mvnun(low, bound1, s0 + mu_t, sigma * tvec[t], **opts)[0] - cdf_rest
+            cdf2 = _mvn.mvnun(low, bound2, s0 + mu_t, sigma * tvec[t], **opts)[0] - cdf_rest
 
         # loop over images
         for j in range(1, k*2):
             sj = _sj_rot(j, s0, k)
 
-            mvn_j = _mvn_timestep(mean=sj + mu_t, cov=sigma * tvec[t])
-            mvn_j.maxpts = 10000*2
+            if not use_mvnun:
+                mvn_j = _mvn_timestep(mean=sj + mu_t, cov=sigma * tvec[t])
+                mvn_j.maxpts = 10000*2
 
+                # total density WITHIN boundaries for jth image
+                cdf_add = mvn_j.cdf(bound0)
 
-            # total density WITHIN boundaries for jth image
-            cdf_add = mvn_j.cdf(bound0)
+                # density BEYOND boundary in one or other direction, for jth image
+                cdf_add1 = mvn_j.cdf(bound1) - cdf_add
+                cdf_add2 = mvn_j.cdf(bound2) - cdf_add
 
-            # density BEYOND boundary in one or other direction, for jth image
-            cdf_add1 = mvn_j.cdf(bound1) - cdf_add
-            cdf_add2 = mvn_j.cdf(bound2) - cdf_add
+            else:
+                # total density WITHIN boundaries for jth image
+                cdf_add = _mvn.mvnun(low, bound0, sj + mu_t, sigma * tvec[t], **opts)[0]
+
+                # density BEYOND boundary in one or other direction, for jth image
+                cdf_add1 = _mvn.mvnun(low, bound1, sj + mu_t, sigma * tvec[t], **opts)[0] - cdf_add
+                cdf_add2 = _mvn.mvnun(low, bound2, sj + mu_t, sigma * tvec[t], **opts)[0] - cdf_add
 
             a_j = _weightj(j, mu[t, :].T, sigma, sj, s0)
             cdf_rest += (a_j * cdf_add)
@@ -497,7 +576,12 @@ def moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, nu
     return p_up, rt_dist, flux1, flux2
 
 
-def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7) -> np.ndarray:
+@np_cache
+def _mvn_timestep(mean: np.ndarray, cov: np.ndarray):
+    return mvn(mean=mean, cov=cov)
+
+
+def _moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7) -> np.ndarray:
 
     sigma, k = _corr_num_images(num_images)
 
@@ -507,6 +591,7 @@ def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7
 
     # FIXME for some reason this seems to produce the same sequences each run
     # would be good to control this more explicitly with seed setting
+    # TODO also repeated rvs calls are slow, consider Cholesky alternative
     for t in range(1, mu.shape[0]):
         dv[t, :] = mvn(mu[t, :].T, cov=V).rvs()
 
@@ -515,6 +600,39 @@ def moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7
     return dv
 
 
+def _multiple_logpdfs_vec_input(xs, means, covs):
+    """multiple_logpdfs` assuming `xs` has shape (N samples, P features).
+
+    https://gregorygundersen.com/blog/2020/12/12/group-multivariate-normal-pdf/
+    """
+    # NumPy broadcasts `eigh`.
+    vals, vecs = np.linalg.eigh(covs)
+
+    # Compute the log determinants across the second axis.
+    logdets = np.sum(np.log(vals), axis=1)
+
+    # Invert the eigenvalues.
+    valsinvs = 1./vals
+
+    # Add a dimension to `valsinvs` so that NumPy broadcasts appropriately.
+    Us = vecs * np.sqrt(valsinvs)[:, None]
+    devs = xs[:, None, :] - means[None, :, :]
+
+    # Use `einsum` for matrix-vector multiplications across the first dimension.
+    devUs = np.einsum('jnk,nki->jni', devs, Us)
+
+    # Compute the Mahalanobis distance by squaring each term and summing.
+    mahas = np.sum(np.square(devUs), axis=2)
+
+    # Compute and broadcast scalar normalizers.
+    dim = xs.shape[1]
+    log2pi = np.log(2 * np.pi)
+
+    out = -0.5 * (dim * log2pi + mahas + logdets[None, :])
+    return out.T
+
+
+# TODO these should possibly be private methods as well...
 def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
 
     if len(mu) != len(tvec):
