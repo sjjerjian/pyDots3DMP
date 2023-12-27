@@ -1,6 +1,5 @@
 import numpy as np
-from scipy.stats import multivariate_normal as mvn
-from statsmodels.sandbox.distributions.extras import mvnormcdf as mvnormcdf
+from scipy.stats import multivariate_normal as mvn, _mvn
 
 import matplotlib.pyplot as plt
 from matplotlib import animation
@@ -10,13 +9,7 @@ from functools import lru_cache, wraps
 from typing import Optional
 from codetiming import Timer
 
-import time
 
-import threading
-
-
-def chol_sample(mean, cov):
-    return mean + np.linalg.cholesky(cov) @ np.random.standard_normal(mean.size)
 
 # https://stackoverflow.com/questions/52331944/cache-decorator-for-numpy-arrays
 def np_cache(function):
@@ -78,14 +71,13 @@ def np_cache_minimal(function):
 @dataclass(repr=False)
 class AccumulatorModelMOI:
     """
-    Dataclass for accumulator model calculated via method of images
+    Dataclass for accumulator model calculated via method of images.
     Initialized with certain parameters, then can calculate pdf, logoddsmap, cdf etc, using class methods
 
     # TODO clean up documentation
     # TODO allow to get cdf or pdf
 
     """
-
     bound: np.ndarray = np.array([1, 1])
     tvec: np.ndarray = field(default=np.arange(0, 2, 0.005))
 
@@ -111,10 +103,9 @@ class AccumulatorModelMOI:
     lo_lose_pdf: np.ndarray = np.array([])
     log_odds: np.ndarray = np.array([])
 
-
-
     @property
     def bound(self):
+        """Return accumulator bound."""
         return self._bound
 
     @bound.setter
@@ -125,6 +116,7 @@ class AccumulatorModelMOI:
 
     @property
     def tvec(self):
+        """Return accumulator time vector."""
         return self._tvec
 
     @tvec.setter
@@ -132,9 +124,9 @@ class AccumulatorModelMOI:
         self._tvec = time_vec
         self.dt = np.gradient(time_vec)
 
-
-    def set_drifts(self, drifts: Optional[list] = None, labels: Optional[list] = None):
-
+    def set_drifts(self, drifts: Optional[list] = None,
+                   labels: Optional[list] = None):
+        """Set accumulator drift rates. Optionally add label for each drift."""
         if drifts is not None:
             self.drift_rates = drifts
 
@@ -142,24 +134,35 @@ class AccumulatorModelMOI:
         # also update drift rates based on sensitivity and urgency, if provided
         for d, drift in enumerate(self.drift_rates):
             drift = drift * np.array([1, -1])
-            self.drift_rates[d] = urgency_scaling(drift * self.sensitivity, self.tvec, self.urgency)
-
+            self.drift_rates[d] = urgency_scaling(drift * self.sensitivity,
+                                                  self.tvec, self.urgency)
 
         if labels is not None:
             self.drift_labels = labels
 
         return self
 
-
     def __post_init__(self):
 
         # default set the drift labels as 0:ndrifts
         if len(self.drift_labels) == 0:
-             self.drift_labels = np.arange(len(self.drift_rates))
+            self.drift_labels = np.arange(len(self.drift_rates))
         self.set_drifts(labels=self.drift_labels)
 
+    def cdf(self):
+        p_corr, rt_dist = [], []
+        for drift in self.drift_rates:
+            p_up, rt, flux1, flux2 = _moi_cdf(self.tvec, drift, self.bound,
+                                              0.025, self.num_images)
+            p_corr.append(p_up)
+            rt_dist.append(rt)
 
-    def _pdf(self, full_pdf=False):
+        self.p_corr = np.array(p_corr)
+        self.rt_dist = np.stack(rt_dist, axis=0)
+
+        return self
+
+    def pdf(self, full_pdf=False):
 
         # TODO allow flexible specification of grid_vec, to use mgrid
         if full_pdf:
@@ -201,42 +204,41 @@ class AccumulatorModelMOI:
 
         return self
 
-
     def log_posterior_odds(self):
+        """Return the log posterior odds given winning and losing pdfs."""
         self.log_odds = log_odds(self.up_lose_pdf, self.lo_lose_pdf)
-        return self
 
-
-    def _cdf(self):
-        p_corr, rt_dist = [], []
-        for drift in self.drift_rates:
-            p_up, rt, flux1, flux2 = moi_cdf(self.tvec, drift, self.bound, 0.025, self.num_images)
-            p_corr.append(p_up)
-            rt_dist.append(rt)
-
-        self.p_corr = np.array(p_corr)
-        self.rt_dist = np.stack(rt_dist, axis=0)
-
-        return self
-
-
-    def dv(self, drift, sigma, cusum=False):
-        return moi_dv(mu=drift*self.tvec.reshape(-1, 1), s=sigma, num_images=self.num_images)
-
+    def dv(self, drift, sigma):
+        """Return accumulated DV for given drift rate and diffusion noise."""
+        return _moi_dv(mu=drift*self.tvec.reshape(-1, 1),
+                       s=sigma, num_images=self.num_images)
 
     def dist(self, return_pdf=False):
-        self._cdf()
+        """Calculate cdf and pdf for accumulator object."""
+        self.cdf()
 
         if return_pdf:
-            self._pdf()
+            self.pdf()
 
         return self
 
+    def plot(self, d_ind: int = -1):
+        """
+        Plot summary of accumulator results.
 
-    def plot(self, d_ind=-1):
+        Parameters
+        ----------
+        d_ind : INT, optional
+            index of which drift rate to plot. The default is the last one.
 
-        # d_ind - index of which drift to plot for PDFs
+        Returns
+        -------
+        fig_cdf : TYPE
+            DESCRIPTION.
+        fig_pdf : TYPE
+            DESCRIPTION.
 
+        """
         fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
         axc[0].plot(self.drift_labels, self.p_corr)
         axc[0].set_xlabel('drift')
@@ -244,14 +246,14 @@ class AccumulatorModelMOI:
         axc[0].set_ylabel('prob. correct choice')
 
         axc[1].plot(self.tvec, self.rt_dist.T)
-        axc[1].legend(self.drift_labels)
+        # axc[1].legend(self.drift_labels, frameon=False)
         axc[1].set_xlabel('Time (s)')
         axc[1].set_title('RT distribution (no NDT)')
         fig_cdf.tight_layout()
 
         fig_pdf = None
-        if self.up_lose_pdf:
-            fig_pdf, axp = plt.subplots(2+self.log_odds, 1, figsize=(5, 6))
+        if self.up_lose_pdf.size > 0:
+            fig_pdf, axp = plt.subplots(3, 1, figsize=(5, 6))
             contour = axp[0].contourf(self.tvec, self.grid_vec,
                                       log_pmap(np.squeeze(self.up_lose_pdf[d_ind, :, :])).T,
                                       levels=100)
@@ -263,7 +265,7 @@ class AccumulatorModelMOI:
             cbar = fig_cdf.colorbar(contour, ax=axp[0])
             cbar = fig_cdf.colorbar(contour, ax=axp[1])
 
-            if self.log_odds:
+            if self.log_odds.size > 0:
                 vmin, vmax = 0, 3
                 contour = axp[2].contourf(self.tvec, self.grid_vec,
                                           self.log_odds.T, vmin=vmin, vmax=vmax,
@@ -277,54 +279,36 @@ class AccumulatorModelMOI:
 
     def plot_3d(self, d_ind=-1):
 
-        # fig, ax = plt.subplots()
-        # cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, 0, :, :])
-        # ax.set_title(f't = {self.tvec[i]:.2f}')
-        # fig.canvas.draw()
-
-        # for i in range(1, len(self.tvec)):
-        #     cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, i, :, :])
-        #     ax.set_title(f't = {self.tvec[i]:.2f}')
-        #     fig.canvas.draw()
-
-        # plt.show()
-
+        # this is super slow right now, need to work on it...
 
         def animate_wrap(i):
-            z = self.pdf3D[d_ind, i, :, :]
-            cont = plt.contourf(self.grid_vec, self.grid_vec, z)
+            z = log_pmap(self.pdf3D[d_ind, i, :, :])
+            cont = plt.contourf(self.grid_vec, self.grid_vec, z, levels=100)
+            plt.title(f"Frame: {i + 1} - {self.tvec[i]:.2f}")
             return cont
 
-        def init():
-            cont = plt.contourf(self.grid_vec, self.grid_vec, self.pdf3D[d_ind, 0, :, :])
-            return cont
+        # def init():
+        #     cont = plt.contourf(self.grid_vec, self.grid_vec, log_pmap(self.pdf3D[d_ind, 0, :, :]),
+        #                         levels=100)
+        #     return cont
 
-        anim_event = threading.Event()
+        fig = plt.figure()
 
-        fig, ax = plt.subplots()
-        anim = animation.FuncAnimation(fig, animate_wrap, frames=len(self.tvec),
-                                       init_func=init, interval=50, repeat=False)
+        anim = animation.FuncAnimation(fig, animate_wrap, frames=len(self.tvec))
+        writervideo = animation.PillowWriter(fps=10)
+        anim.save(f'pdf_animation_{self.drift_labels[d_ind]}.gif', writer=writervideo)
 
-        anim_event.wait()
-
-        # TODO video/gif style plot of third quadrant pdf at each timestep
-
-
-
-
-# ============
-# functions
 
 @np_cache_minimal
 def _sj_rot(j, s0, k):
     """
+    Image rotation formalism.
 
     :param j: jth image
     :param s0: starting_point, length 2 array
     :param k: 2*k-1 is the number of images
     :return:
     """
-
     alpha = (k - 1)/k * np.pi
     sin_alpha = np.sin(j * alpha)
     sin_alpha_plus_k = np.sin(j * alpha + np.pi / k)
@@ -339,21 +323,13 @@ def _sj_rot(j, s0, k):
 
 
 def _weightj(j, mu, sigma, sj, s0):
-    """
-
-    :param j: jth image
-    :param mu: drift rate
-    :param sigma: covariance
-    :param sj: output from sj_rot()
-    :param s0: starting_point, length 2 array
-    :return: image weight
-    """
 
     return (-1) ** j * np.exp(mu @ np.linalg.inv(sigma) @ (sj - s0).T)
 
 
 @lru_cache(maxsize=32)
 def _corr_num_images(num_images):
+
     k = int(np.ceil(num_images / 2))
     rho = -np.cos(np.pi / k)
     sigma = np.array([[1, rho], [rho, 1]])
@@ -644,7 +620,7 @@ def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
             urg = np.insert(urg, 0, 0)
 
         assert len(urg) == len(tvec) == len(mu),\
-            "If urgency signal is a vector, it must match tvec and drift vector lengths"
+            "If urgency is a vector, it must match lengths of tvec and mu"
 
         mu = mu + urg.reshape(-1, 1)
 
@@ -671,17 +647,12 @@ def log_odds(pdf1: np.ndarray, pdf2: np.ndarray) -> np.ndarray:
 
 
 def log_pmap(pdf: np.ndarray, q: int = 30) -> np.ndarray:
-    """
-    for visualization of losing accumulator pdf, it's likely helpful to perform a cutoff and look at log space
-    :param pdf:
-    :param q:
-    :return:
-    """
-
+    """Set cut-off on log odds map, for better visualization."""
     pdf = np.clip(pdf, a_min=10**(-q), a_max=None)
     return (np.log10(pdf)+q) / q
 
 
-
-
+# maybe useful for faster dv simulation (replacement for rvs calls)
+# def chol_sample(mean, cov):
+#     return mean + np.linalg.cholesky(cov) @ np.random.standard_normal(mean.size)
 
