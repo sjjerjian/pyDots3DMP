@@ -21,8 +21,8 @@ def optim_decorator(loss_func):
     is designed to 'wrap' the loss function so that we can easily optimisze over the single loss value,
     while still handling the other parameters and outputs
 
-    You do not need to use this function directly, instead just call the loss function and it will be
-    passed through this decorator, returning the current set of parameters and their associated loss
+    ***You do not need to use this function directly, instead just call the loss function and it will be
+    passed through this decorator, returning the current set of parameters and their associated loss.***
     """
 
     # TODO figure out if where we are setting the fixed parameters is the "right" place
@@ -49,6 +49,7 @@ def optim_decorator(loss_func):
         # convert back to dict for passing to loss function
         params_dict = set_params_dict_from_array(params_array, init_params)
 
+        # print out the current param vals
         for key, val in params_dict.items():
             print(f"{key}: {val}\t")
 
@@ -573,8 +574,10 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
 def dots3dmp_accumulator(params: dict, hdgs, mod, delta, accum_kw: dict,
                   stim_scaling=True, use_signed_drifts: bool = True) -> AccumulatorModelMOI:
     """
-    pared down version of generate_data, just to return accumulator object for given set of hdgs, modality
-    provide kmult param as a 2-element vector for kves and kvis
+    pared down version of generate_data, to return the actual accumulator object for given set of conditions
+    NOTE provide kmult param as a 2-element vector, for kves and kvis
+    
+    TODO consider whether this can be implemented within generate_data, or whether generate_data needs to be broken down.
 
     """
     # initialize accumulator
@@ -586,11 +589,6 @@ def dots3dmp_accumulator(params: dict, hdgs, mod, delta, accum_kw: dict,
     orig_dt = np.diff(orig_tvec[:2]).item()
 
     # set up sensitivity and other parameters
-    # if isinstance(params['ndt'], (int, float)):
-    #     params['ndt'] = [params['ndt']] * len(mods)
-
-    # if (params['sigma_ndt'] == 0) or ('sigma_ndt' not in params):
-    #     params['sigma_ndt'] = 1e-100
 
     if not stim_scaling:
         b_ves, b_vis = np.ones_like(accumulator.tvec), np.ones_like(accumulator.tvec)
@@ -755,47 +753,8 @@ def dots3dmp_accumulator(params: dict, hdgs, mod, delta, accum_kw: dict,
 
     return accumulator, orig_tvec
 
-
-def _margconds_from_intersection(prob_ab, prob_a):
-    """
-    Given joint probabilites of A and B, and marginal probability of A.
-
-    returns marginal prob of B, and conditional of A given B, according to Bayes theorem
-    :param prob_ab:
-    :param prob_a:
-    :return:
-    """
-    prob_a = prob_a.reshape(-1, 1)  # make it 2-D, for element-wise and matrix mults below
-
-    # conditional probability
-    b_given_a = (prob_ab / np.sum(prob_ab)) / prob_a
-
-    prob_b = prob_a.T @ b_given_a
-
-    if np.any(prob_b == 0):
-        a_given_b = b_given_a * prob_a
-    else:
-        a_given_b = b_given_a * prob_a / prob_b
-
-    return a_given_b, prob_b.flatten()
-
-
-def _intersection_from_margconds(a_given_b, prob_a, prob_b):
-    """
-    Recover intersection of a and b using conditionals and marginals, according to Bayes theorem
-    Essentially the inverse of margconds_from_intersection, and the two can be used together e.g.
-    to update the intersections after adding a base_rate to prob_b
-
-    :param a_given_b:
-    :param prob_a:
-    :param prob_b:
-    :return:
-    """
-
-    prob_ab = a_given_b * prob_b
-    b_given_a = prob_ab / prob_a
-
-    return prob_ab, b_given_a
+## % ----------------------------------------------------------------
+## HELPER FUNCTIONS
 
 
 def get_stim_urgs(tvec: np.ndarray = None, skew_params: Optional[tuple] = None,
@@ -836,7 +795,7 @@ def set_params_list(params: np.ndarray, x0: np.ndarray,
 
 
 def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndarray:
-
+    """Extract an array of parameters from the ordered keyword dictionary"""
     if param_keys is None:
         param_keys = ['kmult', 'bound', 'ndt', 'sigma_ndt']
         if 'theta' in params:
@@ -855,7 +814,7 @@ def get_params_array_from_dict(params: dict, param_keys: list = None) -> np.ndar
 
 
 def set_params_dict_from_array(params_array: np.ndarray, ref_dict: dict):
-
+    """Insert an array of parameters back into a dictionary according to the set-up in ref_dict."""
     params_dict = OrderedDict()
     current_index = 0
     for key, value in ref_dict.items():
@@ -871,4 +830,51 @@ def set_params_dict_from_array(params_array: np.ndarray, ref_dict: dict):
         current_index += value_length
 
     return params_dict
+
+
+## % ----------------------------------------------------------------
+## PRIVATE FUNCTIONS
+
+def _margconds_from_intersection(prob_ab, prob_a):
+    """
+    :param prob_ab: joint probability of A and B
+    :param prob_a: marginal probability of A
+    :return: 
+        a_given_b: conditional probability of A given B
+        prob_b: marginal probability of B
+    """
+    prob_a = prob_a.reshape(-1, 1)  # make it 2-D, for element-wise and matrix mults below
+
+    # conditional probability
+    b_given_a = (prob_ab / np.sum(prob_ab)) / prob_a
+
+    prob_b = prob_a.T @ b_given_a
+
+    if np.any(prob_b == 0):
+        a_given_b = b_given_a * prob_a
+    else:
+        a_given_b = b_given_a * prob_a / prob_b
+
+    return a_given_b, prob_b.flatten()
+
+
+def _intersection_from_margconds(a_given_b, prob_a, prob_b):
+    """
+    Recover intersection of a and b using conditionals and marginals, according to Bayes theorem
+    Essentially the inverse of margconds_from_intersection, and the two can be used together e.g.
+    to update the intersections after adding a base_rate to prob_b
+
+    :param a_given_b:
+    :param prob_a:
+    :param prob_b:
+    :return:
+        prob_ab: joint probability of A and B
+        b_given_a
+    """
+
+    prob_ab = a_given_b * prob_b
+    b_given_a = prob_ab / prob_a
+
+    return prob_ab, b_given_a
+
 

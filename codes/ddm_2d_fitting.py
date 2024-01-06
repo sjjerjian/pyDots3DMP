@@ -20,8 +20,6 @@ from pybads import BADS
 
 # %%
 
-
-
 def main(init_params: dict, bounds: Optional[tuple[np.ndarray]] = None,
          fixed: Optional[np.ndarray] = None,
          subject='sim', run_fit=False, **output_kwargs):

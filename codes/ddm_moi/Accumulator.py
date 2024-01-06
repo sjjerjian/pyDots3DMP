@@ -10,9 +10,10 @@ from typing import Optional
 from codetiming import Timer
 
 
-
 # https://stackoverflow.com/questions/52331944/cache-decorator-for-numpy-arrays
 def np_cache(function):
+    """Cache function results so that we don't need to rerun it if called with the same inputs.
+    Numpy arrays are not hashable by themselves, so this is a workaround using tuple casting"""
     @lru_cache
     def cached_wrapper(*args, **kwargs):
 
@@ -41,6 +42,7 @@ def np_cache(function):
 
 
 def np_cache_minimal(function):
+    """Same as np_cache, but for a function with only 1D array inputs or int/float inputs."""
     @lru_cache
     def cached_wrapper(*args, **kwargs):
 
@@ -71,31 +73,39 @@ def np_cache_minimal(function):
 @dataclass(repr=False)
 class AccumulatorModelMOI:
     """
-    Dataclass for accumulator model calculated via method of images.
-    Initialized with certain parameters, then can calculate pdf, logoddsmap, cdf etc, using class methods
-
-    # TODO clean up documentation
-    # TODO allow to get cdf or pdf
+    Dataclass for 2-D accumulator model, calculated via method of images.
+    
+    Instantiate an object of the class with a list of drift rates, bound, and grid settings (time vector and grid vector).
+    Drift rates can be single values (constant rate, or time series matching the length of tvec).
+    Bound can be a single value (same for both accumulators, or separate for each one).
+    The class then has a bunch of method calls associated for calculating the model predictions:
+    - cdf returns a proportion of choices for the "positive" accumulator for each drift rate
+        and the distribution of bound crossing times for each drift rate (independent of which accumulator hits first)
+    - pdf returns the pdf of the accumulator model at each timepoint
+        if full_pdf is False (default), it will return separate pdfs for each marginal (i.e. correct and errors).
+        if full_pdf is True, it will return a single 3-D array of the square grid, with a 2-D pdf for each timepoint
+    - dist runs the cdf method, and optionally the pdf method too (if return_pdf is true), with full_pdf set to False
+    - log_posterior_odds uses the losing accumulator pdfs given correct and errors to calculate log odds of correct choice
 
     """
+    
+    # set default values for parameters
     bound: np.ndarray = np.array([1, 1])
     tvec: np.ndarray = field(default=np.arange(0, 2, 0.005))
+    grid_vec: np.ndarray = field(default=np.arange(-3, 0, 0.025))
 
-    # don't initialize, they will get set by the setter methods!
+    # don't initialize these, they will be set by the setter methods
     _bound: np.ndarray = field(init=False, repr=False)
     _tvec: np.ndarray = field(init=False, repr=False)
 
     dt: float = field(init=False, repr=False)
-
-    grid_spacing: float = field(default=0.025)
     drift_rates: list = field(default_factory=list)
     drift_labels: list = field(default_factory=list)
     sensitivity: float = field(default=1)
     urgency: np.ndarray = field(default=None)
     num_images: int = 7
 
-    # TODO clean this up a bit, if we can?
-    grid_vec: np.ndarray = np.array([])
+    # all empty arrays by default, will get filled by method calls (cdf, pdf, log_odds, dist...)
     p_corr: np.ndarray = np.array([])
     rt_dist: np.ndarray = np.array([])
     pdf3D: np.ndarray = np.array([])
@@ -105,18 +115,17 @@ class AccumulatorModelMOI:
 
     @property
     def bound(self):
-        """Return accumulator bound."""
         return self._bound
 
     @bound.setter
     def bound(self, b):
+        """Set accumulator bound. This is a convenience method which gets run if you write A.bound = ..."""
         if isinstance(b, (int, float)):
             b = [b, b]
         self._bound = np.array(b)
 
     @property
     def tvec(self):
-        """Return accumulator time vector."""
         return self._tvec
 
     @tvec.setter
@@ -126,7 +135,10 @@ class AccumulatorModelMOI:
 
     def set_drifts(self, drifts: Optional[list] = None,
                    labels: Optional[list] = None):
-        """Set accumulator drift rates. Optionally add label for each drift."""
+        """Set accumulator drift rates. Optionally add label for each drift.
+        This also adds a mirrored drift rate for the anti-correlated accumulator, and 
+        updates drift rates based on sensitivity and urgency parameters."""
+        
         if drifts is not None:
             self.drift_rates = drifts
 
@@ -143,9 +155,10 @@ class AccumulatorModelMOI:
         return self
 
     def __post_init__(self):
-
+        """this gets automatically run after object initialization"""
+        
         # default set the drift labels as 0:ndrifts
-        if len(self.drift_labels) == 0:
+        if len(self.drift_labels) == 0 or self.drift_labels is None:
             self.drift_labels = np.arange(len(self.drift_rates))
         self.set_drifts(labels=self.drift_labels)
 
@@ -205,7 +218,7 @@ class AccumulatorModelMOI:
         return self
 
     def log_posterior_odds(self):
-        """Return the log posterior odds given winning and losing pdfs."""
+        """Return the log posterior odds given pdfs"""
         self.log_odds = log_odds(self.up_lose_pdf, self.lo_lose_pdf)
 
     def dv(self, drift, sigma):
@@ -233,12 +246,9 @@ class AccumulatorModelMOI:
 
         Returns
         -------
-        fig_cdf : TYPE
-            DESCRIPTION.
-        fig_pdf : TYPE
-            DESCRIPTION.
-
+        fig_cdf & fig_pdf: figure handles
         """
+        
         fig_cdf, axc = plt.subplots(2, 1, figsize=(4, 5))
         axc[0].plot(self.drift_labels, self.p_corr)
         axc[0].set_xlabel('drift')
@@ -278,8 +288,7 @@ class AccumulatorModelMOI:
 
 
     def plot_3d(self, d_ind=-1):
-
-        # this is super slow right now, need to work on it...
+        raise NotImplementedError("3D plot is extremely slow or getting stuck somehow, need to improve")
 
         def animate_wrap(i):
             z = log_pmap(self.pdf3D[d_ind, i, :, :])
@@ -298,6 +307,14 @@ class AccumulatorModelMOI:
         writervideo = animation.PillowWriter(fps=10)
         anim.save(f'pdf_animation_{self.drift_labels[d_ind]}.gif', writer=writervideo)
 
+## ----------------------------------------------------------------
+## % Private functions
+
+# Python does not have explicit private/public functions, but by convention, private functions
+# are prefaced with an underscore, meaning they are not advised to be called directly from outside
+# the module, but exist only for internal use.
+
+## ----------------------------------------------------------------
 
 @np_cache_minimal
 def _sj_rot(j, s0, k):
@@ -323,13 +340,13 @@ def _sj_rot(j, s0, k):
 
 
 def _weightj(j, mu, sigma, sj, s0):
-
+    """weight of the jth image"""
     return (-1) ** j * np.exp(mu @ np.linalg.inv(sigma) @ (sj - s0).T)
 
 
 @lru_cache(maxsize=32)
 def _corr_num_images(num_images):
-
+    """2-D accumulator correlation given a number of images"""
     k = int(np.ceil(num_images / 2))
     rho = -np.cos(np.pi / k)
     sigma = np.array([[1, rho], [rho, 1]])
@@ -340,14 +357,14 @@ def _corr_num_images(num_images):
 def _moi_pdf_vec(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
                  mu: np.ndarray, bound=np.array([1, 1]), num_images: int = 7):
     """
-    Calculate 2-D pdf according to method of images, vectorized implementation.
+    Calculate 2-D pdf according to method of images (vectorized implementation).
 
     :param xmesh: x-values for pdf computation
     :param ymesh: y-valuues, should match shape of xmesh
     :param tvec: 1-D array containing times to evaluate pdf
     :param mu: drift rate 2xlen(tvec) array (to incorporate any urgency signal)
     :param bound: bound, length 2 array
-    :param num_images: number of images
+    :param num_images: number of images for MOI, default is 7
     :return: 2-D probability density function evaluated at points in xmesh-ymesh
     """
     sigma, k = _corr_num_images(num_images)
@@ -393,15 +410,16 @@ def _moi_pdf_vec(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
 def _moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
             mu: np.ndarray, bound=np.array([1, 1]), num_images: int = 7):
     """
-    Calculate 2-D pdf according to method of images.
+    Calculate pdf according to method of images. Older implementation,
+    this is not vectorized over time so runs slower.
 
-    :param xmesh:
-    :param ymesh:
+    :param xmesh: x-values for pdf computation
+    :param ymesh: y-valuues, should match shape of xmesh
     :param tvec: 1-D array containing times to evaluate pdf
     :param mu: drift rate 2xlen(tvec) array (to incorporate any urgency signal)
     :param bound: bound, length 2 array
-    :param num_images:
-    :return:
+    :param num_images: number of images for MOI, default is 7
+    :return: pdf at each timepoint (t, x, y)-shape array
     """
     sigma, k = _corr_num_images(num_images)
 
@@ -421,17 +439,15 @@ def _moi_pdf(xmesh: np.ndarray, ymesh: np.ndarray, tvec: np.ndarray,
     return pdf_result
 
 
-def _pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
+def _pdf_at_timestep(t, mu: np.ndarray, sigma: np.ndarray, xy_mesh: np.ndarray, k: int, s0: np.ndarray):
 
     pdf = mvn(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
-    # pdf = _mvn_timestep(mean=s0 + mu*t, cov=sigma*t).pdf(xy_mesh)
 
     # j-values start at 1, go to k*2-1
     for j in range(1, k*2):
         sj = _sj_rot(j, s0, k)
         a_j = _weightj(j, mu.T, sigma, sj, s0)
         pdf += a_j * mvn(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
-        # pdf += a_j * _mvn_timestep(mean=sj + mu*t, cov=sigma*t).pdf(xy_mesh)
 
     return pdf
 
@@ -439,7 +455,7 @@ def _pdf_at_timestep(t, mu, sigma, xy_mesh, k, s0):
 # @Timer(name='moi_cdf')
 def _moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, num_images: int = 7):
     """
-    Calculate the cdf of a 2-D particule accumulator.
+    Calculate the cdf of a 2-D particle accumulator.
 
     The function will then return
         a) the probability of a correct choice
@@ -452,7 +468,10 @@ def _moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, n
     :param num_images: number of images for method of images, default 7
     :return: probability of correct choice (p_up), and decision time distribution (rt_dist)
 
-    TODO does the difference between bound and bound_marginal affect anything
+    NOTE bound values are flipped to set the starting point as a negative value from 0, within the lower left quadrant.
+    margin_width then determines the area above the bound (now at 0) at which the cdf is calculated (in practice we 
+    have to calculate the cdf over some area. The extent to which the value of margin_width affects results
+    has not been tested yet.) 
 
     """
     sigma, k = _corr_num_images(num_images)
@@ -464,17 +483,17 @@ def _moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, n
     b0, bm = -margin_width, 0
     bound0 = np.array([b0, b0])
     bound1 = np.array([b0, bm])  # top boundary of third quadrant
-    bound2 = np.array([bm, b0])  # right boundary
+    bound2 = np.array([bm, b0])  # right boundary of third quadrant
 
     # for under the hood call to mvnun
-    low = np.asarray([-np.inf, -np.inf])
+    low = np.asarray([-np.inf, -np.inf]) # evaluate cdf from -inf to 0 (bound)
     opts = dict(maxpts=None, abseps=1e-5, releps=1e-5)
 
-    # calling the lower-level Fortran for generating the mv normal distribution is MUCH faster
+    # calling the lower-level Fortran for generating the mv normal distribution is MUCH MUCH faster
     # lots of overhead associated with repeated calls of mvn.cdf...
-    # downside is that this is a private function, so have to be more careful
-    # skipping checks e.g. on positive definite-ness of cov matrix, and could also change in
-    # future Scipy releases without warning.
+    # downside is that this is a private function, so have to be more careful as it skips a lot of
+    # typical checks e.g. on positive definite-ness of cov matrix. It could also change in
+    # future Scipy releases without warning...
     use_mvnun = True
 
     # skip the first sample (t starts at 1)
@@ -541,20 +560,14 @@ def _moi_cdf(tvec: np.ndarray, mu, bound=np.array([1, 1]), margin_width=0.025, n
 
     p_up = np.sum(flux2) / np.sum(flux1 + flux2)
 
-    # if we want the correct vs error RT distributions,
-    # then presumably can treat flux1 and flux2 as 1-survival_probs
+    # NOTE for correct vs error RT distributions, presumably calculate two survival probs from flux1 and flux2 
     rt_dist = np.diff(np.insert(1-survival_prob, 0, 0))
 
-    # winning and losing pdfs? kinda
+    # winning and losing pdfs?
     # pdf_up = np.diff(flux2)
     # pdf_lo = np.diff(flux1)
 
     return p_up, rt_dist, flux1, flux2
-
-
-@np_cache
-def _mvn_timestep(mean: np.ndarray, cov: np.ndarray):
-    return mvn(mean=mean, cov=cov)
 
 
 def _moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 7) -> np.ndarray:
@@ -565,9 +578,9 @@ def _moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 
 
     dv = np.zeros_like(mu)
 
-    # FIXME for some reason this seems to produce the same sequences each run
-    # would be good to control this more explicitly with seed setting
-    # TODO also repeated rvs calls are slow, consider Cholesky alternative
+    # FIXME default call to rvs may end up resulting in the same result each time because the numpy random number generator
+    # has the same seed on each function call. Not sure why...
+    # TODO repeated rvs calls (calling at each timepoint) ends up being quite slow, consider Cholesky alternative below
     for t in range(1, mu.shape[0]):
         dv[t, :] = mvn(mu[t, :].T, cov=V).rvs()
 
@@ -575,11 +588,19 @@ def _moi_dv(mu: np.ndarray, s: np.ndarray = np.array([1, 1]), num_images: int = 
 
     return dv
 
+# maybe useful for faster dv simulation (replacement for rvs calls)
+# def chol_sample(mean, cov):
+#     return mean + np.linalg.cholesky(cov) @ np.random.standard_normal(mean.size)
+
 
 def _multiple_logpdfs_vec_input(xs, means, covs):
     """multiple_logpdfs` assuming `xs` has shape (N samples, P features).
 
     https://gregorygundersen.com/blog/2020/12/12/group-multivariate-normal-pdf/
+    
+    Thanks to the above link, this provides a much faster way of computing the pdfs across time
+    compared to calling mvn pdf at each timepoint. 
+    TODO I did some crude checks using np.allclose that it gives the same results, but a unit test would be much better...
     """
     # NumPy broadcasts `eigh`.
     vals, vecs = np.linalg.eigh(covs)
@@ -610,7 +631,7 @@ def _multiple_logpdfs_vec_input(xs, means, covs):
 
 # TODO these should possibly be private methods as well...
 def urgency_scaling(mu: np.ndarray, tvec: np.ndarray, urg=None) -> np.ndarray:
-
+    """Scale mu according to urgency vector."""
     if len(mu) != len(tvec):
         mu = np.tile(mu, (len(tvec), 1))
 
@@ -650,9 +671,4 @@ def log_pmap(pdf: np.ndarray, q: int = 30) -> np.ndarray:
     """Set cut-off on log odds map, for better visualization."""
     pdf = np.clip(pdf, a_min=10**(-q), a_max=None)
     return (np.log10(pdf)+q) / q
-
-
-# maybe useful for faster dv simulation (replacement for rvs calls)
-# def chol_sample(mean, cov):
-#     return mean + np.linalg.cholesky(cov) @ np.random.standard_normal(mean.size)
 
