@@ -9,3 +9,5 @@ codes/.vscode/
 codes/pydots3DMP.egg-info/
 
 data/
+
+*.gif
