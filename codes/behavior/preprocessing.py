@@ -130,7 +130,7 @@ def format_onetargconf(df: pd.DataFrame, remove_one_targ: bool = True) -> pd.Dat
 
     if remove_one_targ:
         # create new df with one-target PDW trials removed
-        return df.loc[df['oneTargConf'] == 0]
+        df = df.loc[df['oneTargConf'] == 0, :]
 
     else:
         # create a single category type column for PDW, with oneTarg trials coded as "2"

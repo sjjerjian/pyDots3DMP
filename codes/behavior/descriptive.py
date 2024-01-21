@@ -23,9 +23,9 @@ from .preprocessing import prop_se, cont_se, gaus
 # 5. regression analyses
 
 
-def behavior_means(df, by_conds='heading', long_format=True):
+def behavior_means(df, by_conds='heading', drop_na=True, long_format=True):
 
-    # TODO fix this up 
+    # TODO fix this up
     # p_right = _groupbyconds(df, by_conds, 'choice', prop_se)
     # p_high = _groupbyconds(df, by_conds, 'PDW', prop_se)
     # mean_rt = _groupbyconds(df, by_conds, 'RT', cont_se)
@@ -42,31 +42,34 @@ def behavior_means(df, by_conds='heading', long_format=True):
 
     output_vars = list(agg_funcs.keys())
 
-    df_means = df.groupby(by=by_conds)[output_vars].agg(agg_funcs).dropna(axis=0).reset_index()
+    df_means = df.groupby(by=by_conds)[output_vars].agg(agg_funcs)
+    if drop_na:
+        df_means.dropna(axis=0, inplace=True)
+    df_means = df_means.reset_index()
     df_means.columns = ['_'.join(col) if col[0] in output_vars else col[0] for col in df_means.columns]  # remove multi-level index
 
     if long_format:
         count_melt = df_means.melt(
-            id_vars=by_conds, 
+            id_vars=by_conds,
             value_vars=df_means.columns[df_means.columns.str.contains('count')],
             var_name='variable', value_name='count')
 
         means_melt = df_means.melt(
-            id_vars=by_conds, 
+            id_vars=by_conds,
             value_vars=df_means.columns[df_means.columns.str.contains('mean')],
             var_name='variable', value_name='mean')
 
         sems_melt = df_means.melt(
-            id_vars=by_conds, 
+            id_vars=by_conds,
             value_vars=df_means.columns[df_means.columns.str.contains('_se')],
             var_name='variable', value_name='se')
 
         df_means = count_melt.copy()
         df_means['mean'] = means_melt['mean']
         df_means['se'] = sems_melt['se']
-        
+
         df_means['variable'] = df_means['variable'].apply(lambda x: x.split('_')[0])
-    
+
     return df_means
 
 
@@ -77,16 +80,20 @@ def _groupbyconds(df, by_conds, data_col, errfcn):
 
 
 def replicate_ves(df):
-    """
-    replicate vestibular condition rows, for every coherence level
-    """
-    dup_ves = df.loc[df['modality']==1, :]
-    ucohs = np.unique(df['coherence'])
-    ucohs = ucohs[ucohs != np.unique(dup_ves['coherence'])]
-    
-    result_df = pd.concat([dup_ves.assign(coherence=coh) for coh in ucohs], ignore_index=True)
-    result_df = pd.concat((df, result_df), ignore_index=True)
-    
+    """Replicate vestibular condition rows, for every coherence level."""
+    if 'coherence' in df.columns and len(np.unique(df['coherence'])) > 1:
+        ucohs = np.unique(df['coherence'])
+
+        dup_ves = df.loc[df['modality'] == 1, :]
+        ucohs = np.unique(df['coherence'])
+        ucohs = ucohs[ucohs != np.unique(dup_ves['coherence'])]
+
+        result_df = pd.concat([dup_ves.assign(coherence=coh) for coh in ucohs],
+                              ignore_index=True)
+        result_df = pd.concat((df, result_df), ignore_index=True)
+    else:
+        result_df = df
+
     return result_df
 
 
@@ -95,12 +102,12 @@ def logit_fit_choice_hdg(df, num_hdgs: int = 200) -> pd.Series:
     hdgs = np.unique(df['heading']).reshape(-1, 1)
     xhdgs = np.linspace(np.min(hdgs), np.max(hdgs), num_hdgs).reshape(-1, 1)
 
-    # logreg = smf.logit("choice ~ heading", data=df).fit()  # using formula api
+    # logreg = smf.logit("choice ~ heading", data=df).fit()  # formula api
     logreg = sm.Logit(df['choice'], sm.add_constant(df['heading'])).fit()
     yhat = logreg.predict(sm.add_constant(xhdgs))
     params = logreg.params['heading'], logreg.params['const']
 
-    # alternatively, using sklearn # TODO test
+    # alternatively, using sklearn # TODO test
     # logreg = LogisticRegression().fit(df[['heading]], df['choice'])
     # yhat = logreg.predict_proba(xhdgs)[:, 1]
 
@@ -108,10 +115,7 @@ def logit_fit_choice_hdg(df, num_hdgs: int = 200) -> pd.Series:
 
 
 def gauss_fit_hdg(df, p0: np.ndarray, y_var: str = 'choice', numhdgs: int = 200) -> pd.Series:
-    
-    """
-    gaussian fitting over headings to single set of data
-    """
+    """Gaussian fitting over headings to single set of data."""
     hdgs = np.unique(df['heading']).reshape(-1, 1)
     xhdgs = np.linspace(np.min(hdgs), np.max(hdgs), numhdgs).reshape(-1, 1)
 
@@ -182,25 +186,37 @@ def cue_weighting(fit_results):
 # %%
 
 
-def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='coherence',
+def plot_behavior_hdg(data_obs, data_fit: Optional[pd.DataFrame] = None,
+                      row: str = 'variable', col: str ='coherence',
                       hue: str = 'modality', palette=sns.color_palette(), **fig_kwargs):
-    
+
     def _errbar_plot(x, y, yerr, **kwargs):
         plt.errorbar(x, y, yerr, **kwargs)
 
-    # plot the empirical data points        
+    # plot the empirical data points
     g = sns.FacetGrid(data_obs, row=row, col=col, hue=hue,
                       palette=palette, sharey=False,
                       **fig_kwargs)
+
+    ln_stl = ''
+    if data_fit is None:
+        ln_stl = '-'
     g.map_dataframe(_errbar_plot, 'heading', 'mean', 'se',
-            linestyle='', marker='.')
-    
+                    linestyle=ln_stl, marker='.')
+
     # overlay the fit data as a line
     for ax_key, ax in g.axes_dict.items():
-        ax_data = data_fit.loc[data_fit[col]==ax_key[1], :]
-        sns.lineplot(data=ax_data, x='heading', y=ax_key[0],
-                        hue=hue, ax=ax, palette=palette, legend=False)
-        
+        if data_fit is not None:
+            if col is not None:
+                ax_data = data_fit.loc[data_fit[col]==ax_key[1], :]
+                y = ax_key[0]
+            else:
+                ax_data = data_fit.copy()
+                y = ax_key
+
+            sns.lineplot(data=ax_data, x='heading', y=y,
+                         hue=hue, ax=ax, palette=palette, legend=False)
+
         ax.set_title("")
         if 'choice' in ax_key:
             ax.set_title(f"coh = {ax_key[1]}")
@@ -211,25 +227,25 @@ def plot_behavior_hdg(data_obs, data_fit, row: str = 'variable', col: str ='cohe
             ax.set_ylabel('prop. high')
         elif 'RT' in ax_key:
             # ax.set_ylim([0.5, 1.2])
-            ax.set_ylabel('mean RT (s)')    
+            ax.set_ylabel('mean RT (s)')
 
         xhdgs = np.unique(data_obs['heading'])
         ax.set_xticks(xhdgs)
         ax.set_xticklabels(xhdgs, rotation=40, ha='right')
-    
+
     # TODO add legend back in
     plt.show()
-    
-    return g   
+
+    return g
 
 # %%
 
 def plot_rtq(RTq_func):
     def wrapper(row=None, col='modality', hue='heading', *args, **kwargs):
         RTq = RTq_func(*args, **kwargs)
-        
+
         #sns.relplot(data=RTq, x=RTq['RT']['mean'], y=RTq[kwargs['depvar']]['mean'], row=row, col=col, hue=hue, style=style, kind='line')
-        
+
         g = sns.FacetGrid(RTq, row=row, col=col, hue=hue, aspect=1.5, height=4, sharex=False, sharey=False)
 
         # Iterate through each subplot and plot errorbars
@@ -238,14 +254,14 @@ def plot_rtq(RTq_func):
                          xerr=data['RT']['cont_se'], yerr=data[kwargs['depvar']]['prop_se'],
                          marker='.', markersize=5, capsize=3)
         g.map_dataframe(plot_errorbars, **kwargs)
-        
+
         # Customize labels and legend
         g.set_axis_labels('RT Mean', f"{kwargs['depvar']} Mean")
         g.add_legend()
-        
+
         # Show the plot
         plt.show()
-                
+
         return RTq
     return wrapper
 
@@ -287,4 +303,3 @@ def RTquantiles(df: pd.DataFrame, by_conds, q_conds=None, nq: int=5, depvar: str
 
     return RTq
 
-            
