@@ -24,7 +24,7 @@ from neural.rate_utils import pref_hdg_dir, demean_conditions, condition_average
 from neural.decoding import decode_classifier, decode_roc
 
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedKFold
 
 from neural.NeuralDataClasses import plot_timeseries
 
@@ -62,7 +62,7 @@ def tuning_heading_preference(data):
 # %%
 
 data = quick_load()
-data = data.iloc[:3]  # TEMP, to speed up testing
+# data = data.iloc[:3]  # TEMP, to speed up testing
 
 # _, enough_trials = check_num_trials_per_condition()
 pref_dir_ves, pref_dir_vis, pref_dir_any = tuning_heading_preference(data)
@@ -74,33 +74,32 @@ conds_cw = {
     'mods': [1, 2, 3],
     'cohs': [1, 2],
     'deltas': [0],
-    'hdgs': [0], # don't use super easy headings
+    'hdgs': [-3, -1.5, 0, 1.5, 3], # don't use super easy headings
     'choice': [1, 2],
-    #'PDW': [0, 1],
+    'PDW': [0, 1],
     'oneTargConf': [0],
 }
-cond_labels_cw = ['modality', 'coherenceInd', 'delta', 'heading', 'choice', 'oneTargConf']
+cond_labels_cw = ['modality', 'coherenceInd', 'delta', 'heading', 'choice', 'PDW', 'oneTargConf']
 tr_choice_wager = dots3DMP_create_conditions(conds_cw, cond_labels_cw)
 
 # fine time-resolution, smoothed bin counts
 t_params = {'align_ev': ['stimOn', 'saccOnset'],
             'trange': np.array([[-1.5, 1], [-0.5, 1.5]]),
             'other_ev': [['fpOn', 'fixation', 'targsOn', 'saccOnset'], ['stimOn', 'postTargHold']],
-            'binsize': 0.01
+            'binsize': 0.02
             }
 
 sm_params = {'type': 'boxcar',
             'binsize': t_params['binsize'],
-            'width': 0.25,
-            'normalize': True,
+            'width': 0.1,
             #'sigma': 0.05,
             }
 
 # coarse time-resolution - averages within intervals
-t_params = {'align_ev': ['targsOn', ['stimOn', 'saccOnset'], 'saccOnset', 'postTargHold'],
-            'trange': np.array([[-0.4, 0.0], [0, 0], [-0.3, 0.1], [-0.1, 0.3]]),
-            'binsize': 0,
-            }
+# t_params = {'align_ev': ['targsOn', ['stimOn', 'saccOnset'], 'saccOnset', 'postTargHold'],
+#             'trange': np.array([[-0.4, 0.0], [0.25, -0.3], [-0.3, 0.1], [-0.2, 0]]),
+#             'binsize': 0,
+#             }
 
 
 # task_pops_trials  = build_rate_population(popns=data['Task'], tr_table=tr_choice_wager,
@@ -119,7 +118,6 @@ task_pops_avgs.concat_alignments()
 
 # %% Demean firing rates over these conditions
 
-
 conds_demean = {k: conds_cw[k] for k in conds_cw.keys() & {'mods', 'cohs', 'deltas', 'hdgs'}}
 cond_labels = ['modality', 'coherenceInd', 'delta', 'heading']
 tr_tab_demean = dots3DMP_create_conditions(conds_demean, cond_labels)
@@ -128,8 +126,14 @@ tr_tab_demean = dots3DMP_create_conditions(conds_demean, cond_labels)
 
 # base object for logistics
 model = LogisticRegression(penalty='l1', solver='liblinear')
-# sgkf = StratifiedGroupKFold(n_splits=5)
 
+decode_popn = True
+
+cv_folds = 5
+cv_folds = StratifiedKFold(n_splits=cv_folds, shuffle=True)
+
+# TODO use cv_folds,
+# look at class outomces, look at precision, balanced_accuracy, and roc_score
 
 choice_logit_scores, wager_logit_scores = [], []
 cp_scores, wp_scores = [], []
@@ -139,7 +143,7 @@ sess_cond_frs, sess_demeaned_frs, sess_cw_frs = [], [], []
 for sess_num, pp in enumerate(task_pops_trials):
 
     print(sess_num)
-    # pp.reindex_to_event('stimOn') # TODO issue warning if binsize is 0
+    pp.reindex_to_event('stimOn') # TODO issue warning if binsize is 0
     pp.concat_alignments(insert_blank=True)
 
     # subtract from each trial the mean of its stimulus condition (across all choice and wager outcomes)
@@ -151,15 +155,15 @@ for sess_num, pp in enumerate(task_pops_trials):
     sess_demeaned_frs.append(demeaned_frs)
     #sess_cw_frs.append(cw_avg_frs)
 
-    # choice_logit_score, cg = decode_classifier(f_rates=demeaned_frs, condlist=pp.conds, cond_groups=tr_choice_wager,
-    #                                            cond_cols=['modality', 'coherenceInd'], outcome_col='choice',
-    #                                            model=model, decode_as_population=True, cv=5)
-    # choice_logit_scores.append(choice_logit_score)
+    choice_logit_score, cg = decode_classifier(f_rates=demeaned_frs, condlist=pp.conds, cond_groups=tr_choice_wager,
+                                                cond_cols=['modality', 'coherenceInd'], outcome_col='choice',
+                                                model=model, decode_as_population=decode_popn, cv=cv_folds)
+    choice_logit_scores.append(choice_logit_score)
 
-    # wager_logit_score, cg = decode_classifier(f_rates=demeaned_frs, condlist=pp.conds, cond_groups=tr_choice_wager,
-    #                                            cond_cols=['modality', 'coherenceInd'], outcome_col='PDW',
-    #                                            model=model, decode_as_population=True, cv=5)
-    # wager_logit_scores.append(wager_logit_score)
+    wager_logit_score, cg = decode_classifier(f_rates=demeaned_frs, condlist=pp.conds, cond_groups=tr_choice_wager,
+                                                cond_cols=['modality', 'coherenceInd'], outcome_col='PDW',
+                                                model=model, decode_as_population=decode_popn, cv=cv_folds)
+    wager_logit_scores.append(wager_logit_score)
 
     # %% repeat for CPs/confPs
 
@@ -171,9 +175,9 @@ for sess_num, pp in enumerate(task_pops_trials):
     #                                     cond_cols=['modality'], outcome_col='choice')
 
     # Choice Probability ===
-    cp_score, cg = decode_roc(f_rates=pp.firing_rates, condlist=pp.conds, cond_groups=tr_choice_wager,
-                              cond_cols=['modality', 'coherenceInd'], outcome_col='choice')
-    cp_scores.append(cp_score)
+    # cp_score, cg = decode_roc(f_rates=pp.firing_rates, condlist=pp.conds, cond_groups=tr_choice_wager,
+    #                           cond_cols=['modality', 'coherenceInd'], outcome_col='choice')
+    # cp_scores.append(cp_score)
 
     # === Wager/Confidence Probability ===
     # wp_score, cg = decode_roc(f_rates=demeaned_frs, condlist=pp.conds, cond_groups=tr_choice_wager,
@@ -184,10 +188,17 @@ for sess_num, pp in enumerate(task_pops_trials):
 # %%
 
 # flip CPs to preferred/null, rather than right/left
-cp_stacked = np.vstack(cp_scores)
-cp_stacked[np.isnan(cp_stacked)] = 0.5
+# cp_stacked = np.vstack(cp_scores)
+# cp_stacked[np.isnan(cp_stacked)] = 0.5
 
-cp_stacked = np.where(cp_stacked > 0.5, cp_stacked, 1-cp_stacked)
+# cp_stacked = np.where(cp_stacked > 0.5, cp_stacked, 1-cp_stacked)
+
+if decode_popn:
+    choice_logit_stacked = np.dstack(choice_logit_scores)
+    wager_logit_stacked = np.dstack(wager_logit_scores)
+else:
+    choice_logit_stacked = np.hstack(choice_logit_scores)
+    wager_logit_stacked = np.hstack(wager_logit_scores)
 
 
 
