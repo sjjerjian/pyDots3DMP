@@ -1,0 +1,10 @@
+codetiming==1.4.0
+matplotlib==3.6.2
+seaborn==0.13.1
+numpy==1.23.5
+pandas==1.5.2
+PyBADS==1.0.2
+scikit_learn==1.2.1
+statsmodels==0.13.5
+scipy==1.12.0
+ipykernel==6.29.0
