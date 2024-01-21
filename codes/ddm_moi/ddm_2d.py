@@ -11,7 +11,7 @@ from typing import Optional, Sequence
 from functools import wraps
 from codetiming import Timer
 
-from ddm_moi.Accumulator import AccumulatorModelMOI
+from .Accumulator import AccumulatorModelMOI
 
 def optim_decorator(loss_func):
     """

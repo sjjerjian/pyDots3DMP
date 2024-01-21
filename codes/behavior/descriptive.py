@@ -11,7 +11,8 @@ import statsmodels.formula.api as smf
 from scipy.optimize import curve_fit
 
 from functools import wraps
-from behavior.preprocessing import prop_se, cont_se, gaus
+from typing import Optional
+from .preprocessing import prop_se, cont_se, gaus
 
 
 # TODO functions list
