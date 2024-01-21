@@ -167,8 +167,12 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
         rng = np.random.RandomState(seed)
     else:
         rng = np.random.RandomState()
+        
+    if wager_odds_maps is not None:
+        assert isinstance(wager_odds_maps, list) and len(wager_odds_maps) == len(mods), \
+            "wager_odds_maps must be a list equal to the number of unique modalities"
 
-    # initialize model_data output dataframe
+    # ---- initialize model_data output dataframe ----
     mods = np.unique(data['modality'])
     cohs = np.unique(data['coherence'])
     hdgs = np.unique(data['heading'])
@@ -191,11 +195,8 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
     else:
         save_dv = False
 
-    # set up sensitivity and other parameters
-    if wager_odds_maps is not None:
-        assert isinstance(wager_odds_maps, list) and len(wager_odds_maps) == len(mods), \
-            "wager_odds_maps must be a list equal to the number of unique modalities"
-
+    # ----- set up sensitivity and other parameters -----
+    
     # replicate ndt for each modality if a single value is provided
     if isinstance(params['ndt'], (int, float)):
         params['ndt'] = [params['ndt']] * len(mods)
@@ -313,21 +314,24 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
                 else:
                     drifts_list = abs_drifts.tolist()
 
-                # run the method of images dtb to extract pdfs, cdfs, and LPO
+                # run the method of images - diffusion to bound to extract pdfs, cdfs, and LPO
                 accumulator.set_drifts(drifts_list, hdgs[hdgs >= 0])
                 accumulator.dist(return_pdf=True).log_posterior_odds()
-                wager_odds_maps.append(accumulator.log_odds)
 
-                # allow for different configurations of confidence mapping
+                # TODO allow for different configurations of confidence mapping 
                 if wager_thres == 'log_odds':
-                    wager_odds_above_threshold = [p >= theta for p, theta in zip(wager_odds_maps, params['theta'])]
+                    accumulator.log_posterior_odds()
                 elif wager_thres == 'time':
                     raise NotImplementedError
+                    # flip time axis so that p >= theta will decrease over time
+                    # accumulator.log_odds = np.tile(orig_tvec[::-1], (1, len(accumulator.grid_vec))) # test out dims here
                 elif wager_thres == 'evidence':
                     raise NotImplementedError
-                # TODO just replace wager_odds_maps with a repmat of the grid or time vectors
-                # but probably need to use < to make sure the interpretation/sign of theta is consistent
-                    # wager_odds_above_threshold = [p >= theta for p, theta in zip(wager_odds_maps, params['theta'])]
+                    # accumulator.log_odds = np.tile(accumulator.gric_vec, (1, len(orig_tvec))) # test out dims here
+                
+                # ensure consistent interpretation of theta (i.e. wager_odds > theta should always mean high bet)
+                wager_odds_maps.append(accumulator.log_odds)
+                wager_odds_above_threshold = [p >= theta for p, theta in zip(wager_odds_maps, params['theta'])]
 
 
     # ===== now to generate model results, loop over all conditions =====
