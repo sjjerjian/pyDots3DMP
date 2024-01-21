@@ -21,8 +21,9 @@ def optim_decorator(loss_func):
     is designed to 'wrap' the loss function so that we can easily optimisze over the single loss value,
     while still handling the other parameters and outputs
 
-    ***You do not need to use this function directly, instead just call the loss function and it will be
-    passed through this decorator, returning the current set of parameters and their associated loss.***
+    ***In other words, you do not / should not use this function directly, instead just call the loss 
+    function and it will be passed through this decorator, returning the current set of parameters and 
+    their associated loss.***
     """
 
     # TODO figure out if where we are setting the fixed parameters is the "right" place
@@ -105,7 +106,7 @@ def objective(params: dict, data: pd.DataFrame, outputs: Optional[Sequence] = No
 
     # get model predictions (probabilistic) given parameters
     model_data, wager_maps, _ = generate_data(params=params, data=data,
-                                                 return_wager=return_wager,
+                                                return_wager=return_wager,
                                                  **gen_data_kwargs)
 
     # calculate log likelihoods of parameters, given observed data
@@ -292,6 +293,8 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
                     elif isinstance(cue_weights, tuple):
                         w_ves, wvis = cue_weights
                         
+                        # TODO store the values of the weights (particularly if rand each time), for offline
+                        
                     # Eq 14
                     if stim_scaling:
                         t_comb = w_ves**2 * cumul_bves + w_vis**2 * cumul_bvis
@@ -303,9 +306,8 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
                     else:
                         abs_drifts = np.sqrt(kcomb2).reshape(-1, 1) * sin_uhdgs
 
-                # divide by the new passage of time if we applied the scaling, because we will
-                # re-multiply by it in the Accumulator Class logic,
-                # and this will yield the *position* of the particle
+                # divide by the new passage of time if we applied the scaling (because we will re-multiply 
+                # by it in the Accumulator Class logic, and this will yield the *position* of the particle
                 if stim_scaling:
                     abs_drifts /= accumulator.tvec.reshape(-1, 1)
 
@@ -580,9 +582,12 @@ def dots3dmp_accumulator(params: dict, hdgs, mod, delta, accum_kw: dict,
                   stim_scaling=True, use_signed_drifts: bool = True) -> AccumulatorModelMOI:
     """
     pared down version of generate_data, to return the actual accumulator object for given set of conditions
+    (mainly for testing purposes)
     NOTE provide kmult param as a 2-element vector, for kves and kvis
     
-    TODO consider whether this can be implemented within generate_data, or whether generate_data needs to be broken down.
+    TODO consider whether this can be implemented within generate_data, or more likely, 
+    whether generate_data needs to be refactored and broken down into smaller parts
+    otherwise any changes to the relevant parts of generate_data need to be mirrored here
 
     """
     # initialize accumulator
@@ -788,14 +793,14 @@ def set_params_list(params: np.ndarray, x0: np.ndarray,
     """
     Set the parameter list using current iteration.
 
-    Replaces parameter values with initial set value where fixed is true
+    Replaces parameter values with initial set value, where fixed is true
     """
-    if x0 is not None and (fixed is not None and fixed.sum() > 0):
-        assert x0.shape == params.shape == fixed.shape, "x0 and fixed must match x in shape"
-        params = np.array([q if is_fixed else p for p, q, is_fixed in zip(params, x0, fixed)])
-    else:
-        raise ValueError("initial values x0, or boolean fixed mask not provided")
-
+    
+    if (fixed is not None) and (fixed.sum() > 0):
+        assert x0.shape == params.shape == fixed.shape, "x0 and fixed must match params in shape"
+        params = np.where(fixed, x0, params) # use x0 val wherever fixed is true, otherwise use params val
+        # params = np.array([q if is_fixed else p for p, q, is_fixed in zip(params, x0, fixed)])
+        
     return params
 
 

@@ -55,7 +55,11 @@ conds = {'mods': [1, 2, 3],
 pred_conds = dots3DMP_create_conditions(conds, cond_labels=['modality', 'coherence', 'delta', 'heading'])
 
 # initialize accumulator variables via dict
-accum_kw = {'tvec': np.arange(0, 2, 0.005), 'grid_vec': np.arange(-3, 0, 0.025)}
+
+# can make tvec more or less coarse, trade off between speed of fitting vs precision
+# obviously can go too coarse, in which case RTs get all wonky
+# I think ~0.025 is the upper limit on stepsize, 0.001 on the other end can be quite slow)
+accum_kw = {'tvec': np.arange(0, 2, 0.01), 'grid_vec': np.arange(-3, 0, 0.025)}
 
 # pre-define stimulus urgency time-course, since it will be fixed for all fit iterations
 stim_sc = ddm_2d.get_stim_urgs(tvec=accum_kw['tvec'])
@@ -70,26 +74,37 @@ init_params = {
     'alpha': 0.05,
 }
 
-# first argument of BADS requires an array of inputs
+# BADS requires parameters to be an array
 init_params_array = ddm_2d.get_params_array_from_dict(init_params)
-fixed = np.zeros_like(init_params_array)
 
-outputs = ['choice', 'PDW', 'RT'] # what do we want to include in likelihood calculation
+# Set what we care about in our likelihood calculation
+outputs = ['choice', 'PDW', 'RT'] 
 out_scaling = [1, 1, 1]           # scale the likelihoods of each output by this [1,1,1] is the default
+
+# excluding PDW speeds things up as PDF calculations are all skipped
+outputs = ['choice', 'RT'] 
+out_scaling = [1, 1] 
+
+
+# don't 'fix' any parameters, allow them all to be fit simultaneously
+fixed = np.zeros_like(init_params_array)
 
 # bounds and plausible bounds for BADS
 lb, ub = init_params_array * 0.1, init_params_array * 2
 plb, pub = init_params_array * 0.3, init_params_array * 1.5
 
+# NOTE if you manually specify fixed and bounds as np.arrays, they must all match the length of init_params_array
+# the initial parameter settings have to be between plb and pub, and plb and pub must be within lb and ub
 # %% ===== RUN BADS OPTIMIZATION =====
+
+print("===== Beginning BADS optimization ===== \n\n")
 
 # TODO initialize BADS multiple times from different starting points
 
 # use an anonymous function to pass extra arguments to the objective function
-target = lambda params: ddm_2d.objective(params, init_params, fixed,
-                                        data=data_delta0, accum_kw=accum_kw,
-                                        stim_scaling=stim_sc, method='prob',
-                                        outputs=outputs, llh_scaling=out_scaling)
+target = lambda params: ddm_2d.objective(
+    params, init_params, fixed, data=data_delta0, accum_kw=accum_kw,
+    stim_scaling=stim_sc, pred_method='proba', outputs=outputs, llh_scaling=out_scaling)
 
 # BADS class takes in the target objective function, array of initial parameters, and bounds
 bads = BADS(target, init_params_array, lb, ub, plb, pub)
@@ -108,50 +123,52 @@ result_to_json(bads_result, save_file_name)
 # the optimization routine
 
 # reset the fixed parameters to their initial set values
-# and make a dictionary of the fitted params array to pass to
+# and make a dictionary of the fitted params array to pass to functions below
 init_params_array, fitted_params_array = bads_result.x0, bads_result.x
 fitted_params_array[fixed == 1] = init_params_array[fixed == 1]
 fitted_params = ddm_2d.set_params_dict_from_array(fitted_params_array, init_params)
 
 # now we can use get_llhs, which runs the objective function without applying the fit wrapper
 # NOTE this is what you would use to "hand-check" init_params, without running optimization
-# just substitute init_params in for the params here
-neg_llh, model_llh, model_data, log_odds_maps = \
-    ddm_2d.get_llhs(params=fitted_params, data=data,
-                    outputs=outputs, accum_kw=accum,
-                    method='prob', stim_scaling=stim_scaling, llh_scaling=llh_scaling)
+# (for that case, just substitute your init_params dictionary as the params argument here)
+neg_llh, model_llh, model_data, log_odds_maps = ddm_2d.get_llhs(
+    params=fitted_params, data=data, accum_kw=accum, pred_method='proba', 
+    stim_scaling=stim_scaling, outputs=outputs, llh_scaling=out_scaling)
 
+# ----------------------------------------------------------------
 # 2. NOW we can call generate_data explicitly with the final fitted parameters and a set of conditions
 # for predictions. This set of conditions can be different to the original fit (e.g. we only
-# fit the model to zero conflict trials, but can make predictions on )
-# pred_conds then specifies the trial conditions we want to just get a prediction for
+# fit the model to zero conflict trials, but can make predictions on conflict trials)
 
-# note that rt_method is now set to "mean", or "peak" so that we return an actual RT prediction
-model_data, _, _ = \
-    ddm_2d.generate_data(params=fitted_params, data=pred_conds,
-                        accum_kw=accum, method='prob', rt_method='mean',
-                        stim_scaling=stim_scaling, return_wager=return_wager,
-                        log_odds_maps=log_odds_maps)
+# note that rt_method has to now be set to "mean" (or "peak") so that we return an actual RT prediction from the distribution
+# opting for prediction outputs to be probabilities here (in the case of choice and PDW) although we could just as well draw samples
+# from the probability distributions to simualte trials, or actually simulate trial-by-trial dvs
+return_wager = 'PDW' in outputs
+model_data, _, _ = ddm_2d.generate_data(
+    params=fitted_params, data=pred_conds, accum_kw=accum, 
+    pred_method='prob', rt_method='mean', stim_scaling=stim_scaling, 
+    return_wager=return_PDW, log_odds_maps=log_odds_maps)
 
 
 # %% ===== PLOT RESULTS =====
 
-show_PDW = True
-
 # first for zero conflict
 model_data_delta0 = model_data.loc[model_data['delta'] == 0, :].pipe(replicate_ves)
-plot_results(data_delta0, model_data_delta0, hue='modality', return_wager=show_PDW)
+plot_results(data_delta0, model_data_delta0, hue='modality', return_wager=return_wager)
 
 # and now for cue conflict
 data_deltas = data.loc[data['modality'] == 3, :]
 model_deltas = model_data.loc[model_data['modality'] == 3, :]
-plot_results(data_deltas, model_deltas, hue='delta', return_wager=show_PDW)
+plot_results(data_deltas, model_deltas, hue='delta', return_wager=return_wager)
 
 
 
 
 # END OF MAIN CODE
 # ----------------------------------------------------------------
+
+
+
 
 
 
@@ -179,7 +196,7 @@ def generate_sim_data(sim_params: dict, conds_dict: dict, sim_method='sample', n
 
 
     trial_table = dots3DMP_create_trial_list(**conds_dict, nreps=nreps, shuff=False)
-    accum = {'tvec': np.arange(0, 2, 0.01), 'grid_vec': np.arange(-3, 0, 0.025)}
+    accum = {'tvec': np.arange(0, 2, 0.005), 'grid_vec': np.arange(-3, 0, 0.025)}
 
     # return wager and use stim scaling by default
 
