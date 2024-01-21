@@ -133,7 +133,7 @@ def objective(params: dict, data: pd.DataFrame, outputs: Optional[Sequence] = No
     print('\n\n')
     
     model_results = namedtuple('ModelResults', ['neg_llh', 'llhs', 'model_data', 'wager_maps'])
-    return model_results(neg_llh, llhs, model_data, wager_maps)
+    return model_results(neg_llh, model_llh, model_data, wager_maps)
 
 # get the wrapped function out for when we want to call it without running the optimization!
 get_llhs = objective.__wrapped__
@@ -141,7 +141,7 @@ get_llhs = objective.__wrapped__
 
 @Timer(name="ddm_run_timer")
 def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
-                  pred_method: Optional[str] = 'proba', rt_method: Optional[str] = 'lik',
+                  pred_method: Optional[str] = 'proba', rt_method: Optional[str] = 'lh',
                   save_dv: [bool] = False,
                   stim_scaling: Optional[tuple[bool, tuple]] = True, 
                   cue_weights: Optional[tuple[tuple, str]] = 'optimal', seed: Optional[int] = None, 
@@ -152,12 +152,12 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
     
     pred_method == 'proba', 'sim', or 'sample'
     
-    rt_pred == 'lik', 'mean', 'max' - returns the likelihood of observed RTs, or the mean/max of the RT distribution
+    rt_pred == 'lh', 'mean', 'max' - returns the likelihood of observed RTs, or the mean/max of the RT distribution
     """
  
     # ---- input handling ----
     assert pred_method == 'proba' or pred_method == 'sim_dv' or pred_method == 'sample', "pred_method must be one of 'proba', 'sim_dv', or 'sample'"
-    assert rt_pred == 'mean' or rt_pred == 'max' or rt_pred == 'lik', "return_type must be one of 'lik', 'mean', 'max'"
+    assert rt_method == 'mean' or rt_method == 'max' or rt_method == 'lh', "rt_method must be one of 'mean', 'max', or 'lh'"
     assert cue_weights == 'optimal' or cue_weights == 'random' or (isinstance(cue_weights, tuple) and len(cue_weights)==2), \
         "cue_weights must be one of 'optimal', 'random', or a tuple of length 2"
     assert wager_thres == 'log_odds' or wager_thres == 'time' or wager_thres == 'evidence', \
@@ -554,7 +554,7 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
                         if pred_method == 'sample':
                             rt_output = rng.choice(orig_tvec, trial_index.sum(), replace=True, p=rt_dist) - 0.3
                         else:
-                            if rt_method == 'likelihood':
+                            if rt_method == 'lh':
                                 # NOTE in this case we save the likelihood values, not an RT value!
                                 actual_rts = data.loc[trial_index, 'RT'].values + 0.3
                                 dist_inds = [np.argmin(np.abs(orig_tvec - rt)) for rt in actual_rts]
@@ -562,13 +562,13 @@ def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
                                 rt_output = rt_dist[dist_inds]
                             elif rt_method == 'mean':
                                 rt_output = (orig_tvec * rt_dist).sum() - 0.3
-                            elif rt_method == 'peak':
+                            elif rt_method == 'max':
                                 rt_output = orig_tvec[np.argmax(rt_dist)] - 0.3
 
                         model_data.loc[trial_index, 'RT'] = rt_output
                         
     # to avoid log(0) issues when doing log-likelihoods, replace zeros and ones
-    if return_proba:
+    if pred_method == 'proba':
         model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=0, value=1e-10)
         model_data.loc[:, ['choice', 'PDW']] = model_data.loc[:, ['choice', 'PDW']].replace(to_replace=1, value=1 - 1e-10)
 
