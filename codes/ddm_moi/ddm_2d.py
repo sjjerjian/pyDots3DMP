@@ -142,8 +142,9 @@ get_llhs = objective.__wrapped__
 @Timer(name="ddm_run_timer")
 def generate_data(params: dict, data: pd.DataFrame, accum_kw: dict,
                   pred_method: Optional[str] = 'proba', rt_method: Optional[str] = 'lik',
-                  save_dv: [bool] = False, stim_scaling: Optional[bool, tuple] = True, 
-                  cue_weights: Optional[tuple, str] = 'optimal', seed: Optional[int] = None, 
+                  save_dv: [bool] = False,
+                  stim_scaling: Optional[tuple[bool, tuple]] = True, 
+                  cue_weights: Optional[tuple[tuple, str]] = 'optimal', seed: Optional[int] = None, 
                   return_wager: [bool] = True, wager_odds_maps=None, wager_thres: str = 'log_odds') -> tuple[pd.DataFrame, np.ndarray]:
     """
     Generates model outputs for behavioral variables given parameters and trial conditions.
