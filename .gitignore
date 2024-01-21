@@ -1,4 +1,6 @@
 
+__pycache__/
+
 .idea/
 *.xml
 *.pkl
@@ -6,8 +8,8 @@
 *.png
 codes/build
 codes/.vscode/
-codes/pydots3DMP.egg-info/
+pydots3DMP.egg-info/
 
-data/
+*Data/
 
 *.gif
