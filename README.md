@@ -2,33 +2,32 @@
 
 Python codes for dots3DMP experiments modelling and analysis.
 
-### Basic usage
+### Basic Usage
 
 1. Navigate to the project directory (pyDots3DMP) in your shell environment.
 2. Create a virtual environment ```$ python -m venv <your_env_name>``` \
     [More info on virtual environments](https://python.land/virtual-environments/virtualenv#Why_you_need_virtual_environments)
 3. Activate the virtual environment. On Unix - ```$source <your_env_name>/bin/activate```
-3. Run ``` pip install -r requirements.txt``` to install the package dependencies 
+3. Run ```pip install -r requirements.txt``` to install the package dependencies 
 4. Run a wrapper script e.g. ```dots3DMP_ddm_2d_example.py```, from the project directory (not the scripts sub-folder).
 
 ### ddm_2d design notes
 
-Like standard optimization routines, BADS takes in an objective function to minimize, which returns a single output, the numeric loss to minimize. It's other parameters are a vector array of initial parameters, and corresponding bounds on each parameter (plausible and hard bounds). Most of the handling around this in the code therefore is designed to allow the user to specify the parameter as key-value pairs, and to pass in the conditions list and observed behavior, accumulator design, and other flags/settings for likelihood evaluation.
+Like standard optimization routines, BADS takes in an objective function to minimize, which should return a single output, the evaluated loss. It's other parameters are a vector array of initial parameters, and corresponding bounds on each parameter (plausible and hard bounds). Most of the handling around this in the code therefore is designed to allow the user to specify the parameter as key-value pairs, and to pass in the conditions list and observed behavior, accumulator design, and other flags/settings for likelihood evaluation.
 
-The wrapper example script is {python}```dots3DMP_ddm_2d_example.py```, and the code relies on two sub-packages - ```ddm_moi``` (for handling the accumulator model, parameters, and defining the objective funciton) and ```behavior``` (for processing behavioral data and plotting results).
+The wrapper example script is ```dots3DMP_ddm_2d_example.py```, and the code relies on two sub-packages - ```ddm_moi``` (for handling the accumulator model, parameters, and defining the objective funciton) and ```behavior``` (for processing behavioral data and plotting results).
 
 ```ddm_moi``` is broken down into two submodules:
-    1. ```ddm_2d.py``` 
-        The main workhorse here is ```generate_data```, which takes a set of parameters, a defined accumulator object, a conditions list, and other parameters, and returns model predictions of behavioural outcomes (choice, PDW, RT). The model predictions can either be probabilities, or simulated trials (either based on sampling from the probabilities, or simulating actual decision variables).
+- ```ddm_2d```
+    - The main workhorse here is ```generate_data```, which takes a set of parameters, a defined accumulator object, a conditions list, and other parameters, and returns model predictions of behavioural outcomes (choice, PDW, RT). The model predictions can either be probabilities, or simulated trials (either based on sampling from the probabilities, or simulating actual decision variables).
 
-        The model predictions are always returned as probability during optimization, but simulated trials can be used to generate model predictions with the final fit parameters, or to generate simulated data for testing parameter/model recovery.
+    - The model predictions are always returned as probability during optimization, but simulated trials can be used to generate model predictions with the final fit parameters, or to generate simulated data for testing parameter/model recovery.
 
-        To be used within the context of model evaluation, ```generate_data``` is called by an objective function, which returns the likelihood of the actual observed outcomes in the data to the model probability predictions.
+    - To be used within the context of model evaluation, ```generate_data``` is called by an objective function, which returns the log likelihood of the actual observed outcomes in the data given the model parameters (and therefore the resulting predictions of the model).
 
-        The objective function is further wrapped for passing to the BADS object.
-
-    2.  ```{python}ddm_2d.py``` 
-        This handles all the low-level work of calculating the particles densities (CDFs, PDFs, log odds) that are needed for the model predictions, using the method of images with a two-dimensional accumulator model, and storing results within an Accumulator dataclass.
+    - The objective function is further wrapped for passing to the BADS object.
+- ```Accumulator```
+    - This handles all the low-level work of calculating the particles densities (CDFs, PDFs, log odds) that are needed for the model predictions, using the method of images with a two-dimensional accumulator model, and storing results within an Accumulator dataclass.
 
 
 ## Known issues, limitations and future improvements
@@ -39,5 +38,5 @@ The wrapper example script is {python}```dots3DMP_ddm_2d_example.py```, and the 
 2. There is some skeleton code logic for using ifferent cue combination strategies, and different confidence mappings, but this hasn't been tested.
 3. ```generate_data``` could be doing too many things, and may be better broken down into one function for generating accumulator object and its attributes, and a second function for the model predictions (since these are independent of condition information, and just depend on the accumulator attributes).
 4. Test different optimization routines (e.g. pyBADS vs scipy.minimize), and using multiple initial starting points.
-5. (More) Documentation
+5. Improve/expand documentation
 6. Unit tests
