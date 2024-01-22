@@ -5,11 +5,15 @@ Python codes for dots3DMP experiments modelling and analysis.
 ### Basic Usage
 
 1. Navigate to the project directory (pyDots3DMP) in your shell environment.
-2. Create a virtual environment ```$ python -m venv <your_env_name>``` \
-    [More info on virtual environments](https://python.land/virtual-environments/virtualenv#Why_you_need_virtual_environments)
-3. Activate the virtual environment. On Unix - ```$source <your_env_name>/bin/activate```
-3. Run ```pip install -r requirements.txt``` to install the package dependencies 
-4. Run a wrapper script e.g. ```dots3DMP_ddm_2d_example.py```, from the project directory (not the scripts sub-folder).
+1. Install necessary packages in a virtual environment 
+    - using venv
+        - create virtual environment: ```$ python -m venv <your_env_name>```  
+        - activate virtual environment: ```$ source <your_env_name>/bin/activate``` (MAC OS/Linux)
+        - run ```$ pip install -r requirements.txt```
+    - using conda
+        - create environment (and install dependencies): ```$ conda create --name <your_env_name> --file environment.yml```
+        - activate the environment: ```$ conda activate <your_env_name>```
+1. Run a wrapper script e.g. ```dots3DMP_ddm_2d_example.py```, from the project directory (not the scripts sub-folder).
 
 ### ddm_2d design notes
 

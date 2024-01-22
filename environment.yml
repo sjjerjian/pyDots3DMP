@@ -1,0 +1,21 @@
+# run: conda env create --file environment.yml
+name: neuro-env
+
+channels:
+  - defaults
+  - conda-forge
+
+dependencies:
+  - python>=3.9
+  - matplotlib==3.6
+  - seaborn==0.13
+  - numpy==1.23
+  - pandas==1.5
+  - PyBADS==1.0
+  - scikit-learn==1.2
+  - statsmodels==0.13
+  - scipy==1.12
+  - ipykernel==6.29
+  - pip
+  - pip:
+    - codetiming==1.4
