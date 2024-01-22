@@ -5,11 +5,11 @@
 *.png
 *.gif
 *.venv
+*.vscode/
+*.egg-info/
 
 __pycache__/
-codes/.vscode/
-pydots3DMP.egg-info/
-
 *Data/
+
 
 
