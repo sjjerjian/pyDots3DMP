@@ -1,15 +1,17 @@
 # pyDots3DMP
 
-## Basic usage
+Python codes for dots3DMP experiments modelling and analysis.
+
+### Basic usage
 
 1. Navigate to the project directory (pyDots3DMP) in your shell environment.
-2. Create a virtual environment ```$ python -m venv <your_env_name>```
+2. Create a virtual environment ```$ python -m venv <your_env_name>``` \
     [More info on virtual environments](https://python.land/virtual-environments/virtualenv#Why_you_need_virtual_environments)
-3. Activate the virtual environment ```$source <your_env_name>/bin/activate``` (on Unix systems)
-3. Run ``` pip install -r requirements.txt``` to install the package dependencies (numpy, pandas, pyBADS etc...)
+3. Activate the virtual environment. On Unix - ```$source <your_env_name>/bin/activate```
+3. Run ``` pip install -r requirements.txt``` to install the package dependencies 
 4. Run a wrapper script e.g. ```dots3DMP_ddm_2d_example.py```, from the project directory (not the scripts sub-folder).
 
-## ddm_2d design notes
+### ddm_2d design notes
 
 Like standard optimization routines, BADS takes in an objective function to minimize, which returns a single output, the numeric loss to minimize. It's other parameters are a vector array of initial parameters, and corresponding bounds on each parameter (plausible and hard bounds). Most of the handling around this in the code therefore is designed to allow the user to specify the parameter as key-value pairs, and to pass in the conditions list and observed behavior, accumulator design, and other flags/settings for likelihood evaluation.
 
