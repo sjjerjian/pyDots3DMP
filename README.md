@@ -1,3 +1,5 @@
+### This repository is now archived.
+
 # pyDots3DMP
 
 Python codes for dots3DMP experiments modelling and analysis.
